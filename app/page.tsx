@@ -158,7 +158,7 @@ export default function Home() {
         <p className="font-mono text-[11px] uppercase tracking-[0.5em] text-cyan-300/70">
           realtime multiplayer
         </p>
-        <h1 className="neon-title mt-3 font-display text-5xl font-extrabold tracking-[0.08em] sm:text-7xl">
+        <h1 className="neon-title mt-3 font-display text-[clamp(2rem,8.5vw,4.5rem)] font-extrabold tracking-[0.06em] sm:tracking-[0.08em]">
           NEON&nbsp;SUDOKU
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm text-white/60 sm:text-base">
