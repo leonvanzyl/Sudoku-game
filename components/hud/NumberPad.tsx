@@ -6,12 +6,23 @@ export interface NumberPadProps {
   /** Called with 1-9 for digits, 0 for erase. */
   onInput: (value: number) => void;
   disabled?: boolean;
+  /** Tighter layout for the floating 3D overlay. */
+  compact?: boolean;
 }
 
 /** Touch-friendly digit pad: 1-9 plus erase. */
-export default function NumberPad({ onInput, disabled = false }: NumberPadProps) {
+export default function NumberPad({ onInput, disabled = false, compact = false }: NumberPadProps) {
+  const btnBase = compact
+    ? "btn-ghost aspect-square min-h-11 w-full rounded-lg font-mono text-lg font-bold"
+    : "btn-ghost aspect-square min-h-11 rounded-xl font-mono text-xl font-bold sm:text-2xl";
   return (
-    <div className="grid w-full max-w-md grid-cols-5 gap-2">
+    <div
+      className={
+        compact
+          ? "grid w-[min(78vw,330px)] grid-cols-5 gap-1.5"
+          : "grid w-full max-w-md grid-cols-5 gap-2"
+      }
+    >
       {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => (
         <motion.button
           key={n}
@@ -19,7 +30,7 @@ export default function NumberPad({ onInput, disabled = false }: NumberPadProps)
           whileTap={{ scale: 0.9 }}
           disabled={disabled}
           onClick={() => onInput(n)}
-          className="btn-ghost aspect-square min-h-11 rounded-xl font-mono text-xl font-bold text-cyan-100 transition hover:text-white disabled:opacity-30 sm:text-2xl"
+          className={`${btnBase} text-cyan-100 transition hover:text-white disabled:opacity-30`}
           aria-label={`Enter ${n}`}
         >
           {n}
@@ -30,7 +41,7 @@ export default function NumberPad({ onInput, disabled = false }: NumberPadProps)
         whileTap={{ scale: 0.9 }}
         disabled={disabled}
         onClick={() => onInput(0)}
-        className="btn-ghost aspect-square min-h-11 rounded-xl text-pink-300 transition hover:text-pink-200 disabled:opacity-30"
+        className={`${btnBase} text-pink-300 transition hover:text-pink-200 disabled:opacity-30`}
         aria-label="Erase"
         title="Erase (Backspace)"
       >
@@ -41,7 +52,7 @@ export default function NumberPad({ onInput, disabled = false }: NumberPadProps)
           strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="mx-auto h-6 w-6"
+          className={compact ? "mx-auto h-5 w-5" : "mx-auto h-6 w-6"}
         >
           <path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1Z" />
           <path d="m12 9 6 6" />

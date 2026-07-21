@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import HowToPlay from "@/components/HowToPlay";
 import {
   DIFFICULTIES,
   INVITE_CODE_ALPHABET,
@@ -107,6 +108,7 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [nameError, setNameError] = useState(false);
+  const [showHowTo, setShowHowTo] = useState(false);
 
   const name = nameDraft ?? (mounted ? (localPlayer?.name ?? "") : "");
   const trimmedName = name.trim();
@@ -139,6 +141,21 @@ export default function Home() {
     router.push(`/game/${joinCode}`);
   };
 
+  /** Offline practice: create + start locally, no realtime involved. */
+  const handleSolo = () => {
+    if (busy || !commitName()) return;
+    if (!progression.unlocked.includes(difficulty)) return;
+    setBusy("create");
+    try {
+      const s = useGameStore.getState();
+      const state = s.createGame("coop", difficulty);
+      s.applyStateSync({ ...state, phase: "playing", startedAt: Date.now() });
+      router.push(`/game/${state.code}?solo=1`);
+    } catch {
+      setBusy(null);
+    }
+  };
+
   const bestTimes = useMemo(
     () =>
       DIFFICULTIES.filter((d) => progression.bestTimesMs[d] !== undefined).map(
@@ -166,6 +183,13 @@ export default function Home() {
           the same puzzle head-to-head in a <span className="text-pink-300">race</span>.
           Invite friends with a 6-letter code.
         </p>
+        <button
+          type="button"
+          onClick={() => setShowHowTo(true)}
+          className="btn-ghost mt-5 rounded-xl px-5 py-2.5 font-display text-[11px] font-bold tracking-[0.25em] text-cyan-200/90 transition hover:text-cyan-100"
+        >
+          ？ HOW TO PLAY
+        </button>
       </motion.div>
 
       {/* -------- Name -------- */}
@@ -308,6 +332,14 @@ export default function Home() {
           >
             {busy === "create" ? "GENERATING PUZZLE…" : "LAUNCH GAME"}
           </button>
+          <button
+            type="button"
+            onClick={handleSolo}
+            disabled={busy !== null}
+            className="btn-ghost mt-3 w-full rounded-2xl px-6 py-3 font-display text-xs font-bold tracking-[0.25em] text-white/70 transition hover:text-white"
+          >
+            PRACTICE SOLO — NO FRIENDS NEEDED
+          </button>
         </motion.section>
 
         {/* Right column: join + profile */}
@@ -408,6 +440,10 @@ export default function Home() {
       >
         host is authority · no accounts · session dies with the host
       </motion.p>
+
+      <AnimatePresence>
+        {showHowTo && <HowToPlay onClose={() => setShowHowTo(false)} />}
+      </AnimatePresence>
     </main>
   );
 }

@@ -11,11 +11,11 @@ import SudokuScene from "./SudokuScene";
 
 export default function Board3D() {
   return (
-    <div className="relative h-full min-h-[420px] w-full overflow-hidden rounded-2xl">
+    <div className="relative h-full w-full overflow-hidden">
       <Canvas
         dpr={[1, 2]}
         camera={{ position: [0, 9.5, 10.5], fov: 40 }}
-        gl={{ antialias: true, powerPreference: "high-performance" }}
+        gl={{ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true }}
         style={{ background: "#060a13", touchAction: "none" }}
       >
         <SudokuScene />

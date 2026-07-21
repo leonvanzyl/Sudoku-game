@@ -6,12 +6,20 @@
 // cause React re-renders. A tile only re-renders when its value or the
 // color of its digit changes.
 
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { RoundedBox, Text } from "@react-three/drei";
+import { configureTextBuilder } from "troika-three-text";
 import { useGameStore } from "@/lib/store/gameStore";
 import { cellPosition, TILE_HEIGHT, TILE_SIZE } from "./layout";
+
+// Parse the digit font on the main thread: troika's default worker path adds
+// a blob-worker + fetch indirection that can stall the whole suspended scene
+// on restrictive browsers/networks, and we only ever shape 9 glyphs.
+if (typeof window !== "undefined") {
+  configureTextBuilder({ useWorker: false });
+}
 
 export interface TileHandle {
   group: THREE.Group | null;
@@ -80,20 +88,27 @@ const Tile = memo(function Tile({ index, value, given, textColor, register }: Ti
         />
       </RoundedBox>
       {value !== 0 && (
-        <Text
-          position={[0, TILE_HEIGHT / 2 + 0.02, 0]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          fontSize={0.52}
-          color={textColor}
-          anchorX="center"
-          anchorY="middle"
-          // Same-color outline fakes a bold weight without loading extra fonts.
-          outlineWidth={given ? 0.024 : 0.014}
-          outlineColor={textColor}
-          characters="123456789"
-        >
-          {String(value)}
-        </Text>
+        // Isolated Suspense: a slow/stuck glyph pipeline must never blank
+        // the whole board — tiles render immediately, digits pop in.
+        <Suspense fallback={null}>
+          <Text
+            position={[0, TILE_HEIGHT / 2 + 0.02, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            // Self-hosted font: troika's default font comes from a CDN, which
+            // stalls the whole board for players behind blocked/flaky networks.
+            font="/fonts/orbitron-700.woff"
+            fontSize={0.52}
+            color={textColor}
+            anchorX="center"
+            anchorY="middle"
+            // Same-color outline fakes a bold weight without loading extra fonts.
+            outlineWidth={given ? 0.024 : 0.014}
+            outlineColor={textColor}
+            characters="123456789"
+          >
+            {String(value)}
+          </Text>
+        </Suspense>
       )}
     </group>
   );

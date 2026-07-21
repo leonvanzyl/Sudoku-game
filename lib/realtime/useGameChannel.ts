@@ -131,8 +131,16 @@ export interface UseGameChannelResult {
  * implements the host's authority duties (answer request-sync, rebroadcast
  * state on presence changes, publish game-over on win) plus the client-side
  * host-left watchdog.
+ *
+ * Pass `enabled: false` (solo practice) to skip all realtime wiring — the
+ * hook then never touches Ably and publish/endSession become no-ops; the
+ * caller is expected to loop messages back into the store itself.
  */
-export function useGameChannel(code: string): UseGameChannelResult {
+export function useGameChannel(
+  code: string,
+  opts?: { enabled?: boolean },
+): UseGameChannelResult {
+  const enabled = opts?.enabled ?? true;
   const [sessionEnded, setSessionEnded] = useState(false);
   const sessionEndedRef = useRef(false);
 
@@ -159,16 +167,17 @@ export function useGameChannel(code: string): UseGameChannelResult {
 
   const publish = useCallback(
     async (msg: GameMessage): Promise<void> => {
-      if (typeof window === "undefined" || !code) return;
+      if (!enabled || typeof window === "undefined" || !code) return;
       const lp = useGameStore.getState().localPlayer;
       if (!lp) return;
       const channel = getAblyClient(lp.id).channels.get(channelName(code));
       await channel.publish(msg.type, msg);
     },
-    [code],
+    [code, enabled],
   );
 
   const endSession = useCallback(async (): Promise<void> => {
+    if (!enabled) return;
     const store = useGameStore.getState();
     if (!store.isHost) return;
     try {
@@ -188,10 +197,10 @@ export function useGameChannel(code: string): UseGameChannelResult {
     }
     if (code) clearHostSnapshot(code);
     useGameStore.getState().leaveGame();
-  }, [code, publish]);
+  }, [code, publish, enabled]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !code) return;
+    if (!enabled || typeof window === "undefined" || !code) return;
     // Host refresh recovery: restore this tab's authoritative state (if any)
     // BEFORE reading localPlayer / entering presence, so the host re-enters
     // presence flagged as host.
@@ -530,7 +539,7 @@ export function useGameChannel(code: string): UseGameChannelResult {
             });
         });
     };
-  }, [code, localPlayerId, publish, endSessionLocally]);
+  }, [code, localPlayerId, publish, endSessionLocally, enabled]);
 
   return { publish, endSession, connectionStatus, sessionEnded };
 }

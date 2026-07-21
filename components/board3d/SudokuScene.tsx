@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, type ComponentRef } from "react";
 import * as THREE from "three";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { MeshReflectorMaterial, OrbitControls } from "@react-three/drei";
 import { useGameStore } from "@/lib/store/gameStore";
 import { fxBus } from "@/lib/fx/bus";
@@ -16,6 +16,21 @@ import { ShakeManager, nowSeconds } from "./cellFx";
 import { BOARD_SPAN, cellPosition, GAP_CENTERS, TILE_HEIGHT } from "./layout";
 
 const BG = "#060a13";
+
+/** Home viewing direction (matches the Canvas' initial camera position). */
+const HOME_DIR = new THREE.Vector3(0, 9.5, 10.5).normalize();
+
+/**
+ * Camera distance that frames the whole board with margin. Landscape uses
+ * the base distance; portrait pulls back proportionally so the 9×9 grid
+ * never overflows a phone screen.
+ */
+function fittedDistance(width: number, height: number): number {
+  const aspect = width / Math.max(1, height);
+  const base = 14.2;
+  if (aspect >= 1) return base;
+  return Math.min(32, (base * 1.07) / Math.max(0.42, Math.pow(aspect, 0.95)));
+}
 
 function Ground() {
   return (
@@ -82,12 +97,46 @@ export default function SudokuScene() {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   const shake = useMemo(() => new ShakeManager(), []);
   const shakeOut = useRef({ x: 0, z: 0 });
+  /** While in the future, useFrame damps the camera back to the home view. */
+  const recenterUntil = useRef(0);
+
+  const gl = useThree((s) => s.gl);
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
 
   useEffect(() => {
     return fxBus.on((e: FxEvent) => {
       if (e.type === "cell-wrong") shake.trigger(0.5);
     });
   }, [shake]);
+
+  /* Auto-fit: frame the whole board on mount and on viewport changes
+   * (portrait phones need a longer camera distance than landscape). */
+  useEffect(() => {
+    const dist = fittedDistance(size.width, size.height);
+    camera.position.copy(HOME_DIR).multiplyScalar(dist);
+    camera.lookAt(0, 0, 0);
+  }, [size.width, size.height, camera]);
+
+  /* Double-tap (or double-click) anywhere on the canvas re-centers the
+   * camera — an easy escape hatch after orbiting/zooming into a mess. */
+  useEffect(() => {
+    const el = gl.domElement;
+    let lastTap = 0;
+    let lastX = 0;
+    let lastY = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      const now = performance.now();
+      const isDouble =
+        now - lastTap < 320 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 40;
+      lastTap = now;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      if (isDouble) recenterUntil.current = now + 900;
+    };
+    el.addEventListener("pointerdown", onPointerDown);
+    return () => el.removeEventListener("pointerdown", onPointerDown);
+  }, [gl]);
 
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
@@ -100,6 +149,14 @@ export default function SudokuScene() {
       shake.sample(nowSeconds(), shakeOut.current);
       sway.position.x = shakeOut.current.x;
       sway.position.z = shakeOut.current.z;
+    }
+    // Double-tap recenter: damp the camera back to the fitted home view.
+    if (performance.now() < recenterUntil.current) {
+      const dist = fittedDistance(state.size.width, state.size.height);
+      const cam = state.camera;
+      cam.position.x = THREE.MathUtils.damp(cam.position.x, HOME_DIR.x * dist, 5, dt);
+      cam.position.y = THREE.MathUtils.damp(cam.position.y, HOME_DIR.y * dist, 5, dt);
+      cam.position.z = THREE.MathUtils.damp(cam.position.z, HOME_DIR.z * dist, 5, dt);
     }
     // Subtle camera-target drift toward the selected cell.
     const controls = controlsRef.current;
@@ -121,7 +178,8 @@ export default function SudokuScene() {
   return (
     <>
       <color attach="background" args={[BG]} />
-      <fog attach="fog" args={[BG, 15, 36]} />
+      {/* Far enough that the pulled-back portrait camera isn't fogged out. */}
+      <fog attach="fog" args={[BG, 26, 64]} />
 
       {/* Soft key + cool rim lighting */}
       <ambientLight intensity={0.55} />
@@ -143,7 +201,7 @@ export default function SudokuScene() {
         dampingFactor={0.08}
         rotateSpeed={0.6}
         minDistance={7.5}
-        maxDistance={18}
+        maxDistance={32}
         minPolarAngle={0.3}
         maxPolarAngle={1.25}
       />
