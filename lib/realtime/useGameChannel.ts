@@ -9,16 +9,92 @@ import type {
 import {
   channelName,
   PLAYER_COLORS,
+  type CellEntry,
   type GameMessage,
   type GameStore,
   type PlayerInfo,
   type RaceProgress,
+  type SharedGameState,
 } from "@/lib/types";
 import { useGameStore } from "@/lib/store/gameStore";
 import { getAblyClient } from "@/lib/realtime/ablyClient";
 
 /** Host absent from presence for longer than this => session is over. */
 const HOST_LEFT_GRACE_MS = 10_000;
+
+/**
+ * Per-tab snapshot of the host's authoritative state, keyed by invite code.
+ * There is no server persistence, so an accidental page refresh would
+ * otherwise wipe the only copy of the game and strand every client: the
+ * refreshed host would come back with game=null / isHost=false, nobody could
+ * answer request-sync, and no client could ever publish game-over.
+ * sessionStorage survives a refresh but not a closed tab, which matches the
+ * "host client is the authority" contract.
+ */
+const hostSnapshotKey = (code: string) => `sudoku:host-state:${code}`;
+
+interface HostSnapshot {
+  state: SharedGameState;
+  localBoard: CellEntry[];
+}
+
+function saveHostSnapshot(code: string): void {
+  const s = useGameStore.getState();
+  if (!s.isHost || !s.game || s.game.code !== code) return;
+  try {
+    const snap: HostSnapshot = { state: s.game, localBoard: s.localBoard };
+    window.sessionStorage.setItem(hostSnapshotKey(code), JSON.stringify(snap));
+  } catch {
+    // storage unavailable/full — refresh recovery just won't be possible
+  }
+}
+
+function clearHostSnapshot(code: string): void {
+  try {
+    window.sessionStorage.removeItem(hostSnapshotKey(code));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * If this tab was the host of `code` and lost its in-memory state (page
+ * refresh), restore the authoritative game (and race board) before entering
+ * presence, so the host re-enters flagged as host and can answer
+ * request-sync again.
+ */
+function restoreHostSnapshot(code: string): void {
+  const store = useGameStore.getState();
+  if (store.game || !store.localPlayer) return;
+  let raw: string | null = null;
+  try {
+    raw = window.sessionStorage.getItem(hostSnapshotKey(code));
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  try {
+    const snap = JSON.parse(raw) as Partial<HostSnapshot>;
+    const state = snap?.state;
+    if (!state || state.code !== code || !Array.isArray(state.players)) return;
+    // Only the original host may restore authority from its own snapshot.
+    const me = state.players.find((p) => p.id === store.localPlayer?.id);
+    if (!me?.isHost) return;
+    store.applyStateSync(state);
+    if (Array.isArray(snap.localBoard) && snap.localBoard.length === 81) {
+      useGameStore.setState({ localBoard: snap.localBoard });
+    }
+  } catch {
+    // corrupt snapshot — ignore
+  }
+}
+
+/**
+ * Live mounts per channel name — lets the effect cleanup detach/release the
+ * Ably channel only when no other mount (e.g. a strict-mode remount) is
+ * still using it.
+ */
+const channelMounts = new Map<string, number>();
 
 type ConnectionStatus = GameStore["connectionStatus"];
 
@@ -77,8 +153,9 @@ export function useGameChannel(code: string): UseGameChannelResult {
     if (sessionEndedRef.current) return;
     sessionEndedRef.current = true;
     setSessionEnded(true);
+    if (code) clearHostSnapshot(code);
     useGameStore.getState().leaveGame();
-  }, []);
+  }, [code]);
 
   const publish = useCallback(
     async (msg: GameMessage): Promise<void> => {
@@ -109,17 +186,33 @@ export function useGameChannel(code: string): UseGameChannelResult {
         // ignore
       }
     }
+    if (code) clearHostSnapshot(code);
     useGameStore.getState().leaveGame();
   }, [code, publish]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !code) return;
+    // Host refresh recovery: restore this tab's authoritative state (if any)
+    // BEFORE reading localPlayer / entering presence, so the host re-enters
+    // presence flagged as host.
+    restoreHostSnapshot(code);
     const localPlayer = useGameStore.getState().localPlayer;
     if (!localPlayer) return;
+    if (useGameStore.getState().isHost) {
+      hostClientIdRef.current = localPlayer.id;
+    }
 
     let disposed = false;
     const client = getAblyClient(localPlayer.id);
-    const channel: RealtimeChannel = client.channels.get(channelName(code));
+    const chanName = channelName(code);
+    channelMounts.set(chanName, (channelMounts.get(chanName) ?? 0) + 1);
+    const channel: RealtimeChannel = client.channels.get(chanName);
+
+    // Keep the per-tab host snapshot current so a page refresh can restore it.
+    saveHostSnapshot(code);
+    const unsubscribePersist = useGameStore.subscribe(() => {
+      saveHostSnapshot(code);
+    });
 
     const clearWatchdog = () => {
       if (watchdogRef.current !== null) {

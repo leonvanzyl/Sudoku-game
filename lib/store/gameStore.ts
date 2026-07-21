@@ -59,6 +59,52 @@ function upsertProgress(list: RaceProgress[], p: RaceProgress): RaceProgress[] {
   return next;
 }
 
+/**
+ * Merge an incoming (host) race-progress list into the current one for a
+ * mid-game state-sync. The local player's own entry is authoritative locally,
+ * and for other players we never regress: a finished entry beats an
+ * unfinished one, and a higher correctCount beats a stale lower one. Entries
+ * only known locally are kept.
+ */
+function mergeRaceProgress(
+  current: RaceProgress[],
+  incoming: RaceProgress[],
+  localPlayerId: string | null,
+): RaceProgress[] {
+  const currentById = new Map(current.map((p) => [p.playerId, p] as const));
+  const merged = incoming.map((inc) => {
+    const cur = currentById.get(inc.playerId);
+    if (!cur) return inc;
+    if (localPlayerId !== null && inc.playerId === localPlayerId) return cur;
+    if (cur.finishedAtMs !== null && inc.finishedAtMs === null) return cur;
+    if (inc.finishedAtMs === null && cur.correctCount > inc.correctCount) return cur;
+    return inc;
+  });
+  const incomingIds = new Set(incoming.map((p) => p.playerId));
+  for (const cur of current) {
+    if (!incomingIds.has(cur.playerId)) merged.push(cur);
+  }
+  return merged;
+}
+
+/**
+ * Merge an incoming (host) co-op board into the current one for a mid-game
+ * state-sync. The host composes its snapshot before its publish is
+ * serialized, so a move ordered ahead of the snapshot (and already applied
+ * locally in delivery order) may be missing from it — never let the snapshot
+ * revert such moves. Incoming locked (correct) entries are always adopted;
+ * otherwise locally-known values win over the snapshot.
+ */
+function mergeCoopBoard(current: CellEntry[], incoming: CellEntry[]): CellEntry[] {
+  if (current.length !== incoming.length) return incoming;
+  return incoming.map((inc, i) => {
+    const cur = current[i];
+    if (inc.locked) return inc; // solution-correct — safe to adopt
+    if (cur.locked || cur.value !== inc.value) return cur;
+    return inc;
+  });
+}
+
 function initialViewMode(): ViewMode {
   if (typeof window === "undefined") return "2d";
   try {
@@ -158,11 +204,36 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   applyStateSync: (state) => {
     const { game, localPlayer, isHost } = get();
     const isNewGame = !game || game.code !== state.code;
+    // A finished game never reverts to a live one: a snapshot composed in the
+    // window before the host's game-over echo would otherwise un-finish the
+    // game locally with no recovery path.
+    if (!isNewGame && game.phase === "finished" && state.phase !== "finished") {
+      return;
+    }
     const me = localPlayer
       ? state.players.find((p) => p.id === localPlayer.id) ?? null
       : null;
+    // Mid-game rebroadcasts are merged, not applied wholesale: the snapshot
+    // may predate moves/progress already applied locally in delivery order.
+    const next: SharedGameState = isNewGame
+      ? state
+      : {
+          ...state,
+          coopBoard:
+            state.mode === "coop"
+              ? mergeCoopBoard(game.coopBoard, state.coopBoard)
+              : state.coopBoard,
+          raceProgress:
+            state.mode === "race"
+              ? mergeRaceProgress(
+                  game.raceProgress,
+                  state.raceProgress,
+                  localPlayer?.id ?? null,
+                )
+              : state.raceProgress,
+        };
     set({
-      game: state,
+      game: next,
       isHost: me ? me.isHost : isHost,
       localPlayer:
         me && localPlayer
@@ -341,10 +412,20 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         : game.players.find((p) => p.id === winnerId)?.name ?? null;
     fxBus.emit(won ? { type: "victory", winnerName } : { type: "defeat" });
 
-    // Record the result exactly once per game for the local player.
+    // Record the result exactly once per game for the local player. In race
+    // mode prefer the elapsed time captured when the local player actually
+    // finished, not Date.now() at game-over delivery (publish round-trip).
     if (recordedGameCode !== game.code) {
       recordedGameCode = game.code;
-      const elapsedMs = game.startedAt !== null ? Date.now() - game.startedAt : null;
+      const own = localPlayer
+        ? game.raceProgress.find((p) => p.playerId === localPlayer.id)
+        : undefined;
+      const elapsedMs =
+        game.mode === "race" && own?.finishedAtMs != null
+          ? own.finishedAtMs
+          : game.startedAt !== null
+            ? Date.now() - game.startedAt
+            : null;
       get().recordResult(won, game.difficulty, elapsedMs);
     }
   },
