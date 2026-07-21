@@ -66,8 +66,12 @@ export function useGameChannel(code: string): UseGameChannelResult {
   const gameOverSentRef = useRef(false);
   const watchdogRef = useRef<number | null>(null);
 
-  const localPlayerId = useGameStore((s) => s.localPlayer?.id ?? null);
-  const connectionStatus = useGameStore((s) => s.connectionStatus);
+  const localPlayerId = useGameStore(
+    (s: GameStore) => s.localPlayer?.id ?? null,
+  );
+  const connectionStatus = useGameStore(
+    (s: GameStore) => s.connectionStatus,
+  );
 
   const endSessionLocally = useCallback(() => {
     if (sessionEndedRef.current) return;
@@ -206,7 +210,7 @@ export function useGameChannel(code: string): UseGameChannelResult {
         case "race-finished": {
           if (data.playerId !== store.localPlayer?.id) {
             const existing = store.game?.raceProgress.find(
-              (p) => p.playerId === data.playerId,
+              (p: RaceProgress) => p.playerId === data.playerId,
             );
             const finished: RaceProgress = existing
               ? { ...existing, finishedAtMs: data.elapsedMs }
