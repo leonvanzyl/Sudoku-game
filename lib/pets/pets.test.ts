@@ -61,6 +61,30 @@ describe("pet catalog", () => {
     expect(sp.names).toContain(petName(sp, "owner-1"));
   });
 
+  it("honors a player's requested species when it is free", () => {
+    const players = roster(["p1", "p2"]);
+    players[1].petId = "turtle";
+    const assigned = assignPetSpecies(players);
+    expect(assigned.get("p2")?.id).toBe("turtle");
+  });
+
+  it("resolves duplicate requests by join order — earlier player wins", () => {
+    const players = roster(["p1", "p2"]);
+    players[0].petId = "fox";
+    players[1].petId = "fox";
+    const assigned = assignPetSpecies(players);
+    expect(assigned.get("p1")?.id).toBe("fox");
+    expect(assigned.get("p2")?.id).not.toBe("fox");
+    expect(assigned.get("p2")?.id).toBeDefined();
+  });
+
+  it("ignores unknown species requests and falls back to the hash default", () => {
+    const plain = assignPetSpecies(roster(["p1"]));
+    const bogus = roster(["p1"]);
+    bogus[0].petId = "dragon";
+    expect(assignPetSpecies(bogus).get("p1")?.id).toBe(plain.get("p1")?.id);
+  });
+
   it("hash is non-negative for arbitrary ids", () => {
     for (const s of ["", "a", "🐸", "some-nanoid-Xy123"]) {
       expect(petHash(s)).toBeGreaterThanOrEqual(0);

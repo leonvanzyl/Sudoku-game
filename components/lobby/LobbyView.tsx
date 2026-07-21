@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import ColorPicker from "@/components/ColorPicker";
+import PetPicker from "@/components/pets/PetPicker";
+import { assignPetSpecies, petName } from "@/lib/pets/catalog";
 import { useGameStore } from "@/lib/store/gameStore";
 import type { GameStore } from "@/lib/types";
 
@@ -21,6 +23,8 @@ export interface LobbyViewProps {
   connectionStatus: GameStore["connectionStatus"];
   /** Change the local player's color (announced to the room). */
   onPickColor: (color: string) => void;
+  /** Change the local player's pet species (announced to the room). */
+  onPickPet: (petId: string) => void;
 }
 
 /** Pre-game lobby: invite code, roster, settings summary, start control. */
@@ -29,6 +33,7 @@ export default function LobbyView({
   starting,
   connectionStatus,
   onPickColor,
+  onPickPet,
 }: LobbyViewProps) {
   const game = useGameStore((s) => s.game);
   const isHost = useGameStore((s) => s.isHost);
@@ -39,6 +44,16 @@ export default function LobbyView({
 
   const takenColors = new Set(
     game.players.filter((p) => p.id !== localPlayer?.id).map((p) => p.color),
+  );
+
+  // Effective pet per player (requests + conflicts resolved by join order).
+  const petByPlayer = assignPetSpecies(game.players);
+  const myPet = localPlayer ? (petByPlayer.get(localPlayer.id) ?? null) : null;
+  const takenPets = new Set(
+    game.players
+      .filter((p) => p.id !== localPlayer?.id)
+      .map((p) => petByPlayer.get(p.id)?.id)
+      .filter((id): id is string => id !== undefined),
   );
 
   const copyCode = async () => {
@@ -197,6 +212,23 @@ export default function LobbyView({
             value={localPlayer?.color ?? null}
             taken={takenColors}
             onChange={onPickColor}
+          />
+        </div>
+        <div className="mt-4 border-t border-white/[0.07] pt-4">
+          <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-white/45">
+            your pet
+            {myPet && localPlayer && (
+              <span className="ml-2 normal-case tracking-normal text-white/55">
+                — {petName(myPet, localPlayer.id)} the {myPet.label}
+              </span>
+            )}
+          </p>
+          <PetPicker
+            className="mt-2.5"
+            value={myPet?.id ?? null}
+            taken={takenPets}
+            accent={localPlayer?.color ?? "#22d3ee"}
+            onChange={onPickPet}
           />
         </div>
       </div>

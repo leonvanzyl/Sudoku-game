@@ -119,6 +119,11 @@ Must not import from `components/board2d`.
   `petAssistLocal` in race) and `disaster` messages (host). Respects the
   host-toggleable `petsEnabled` / `eventsEnabled` flags in SharedGameState
   (toggled live via the `fun-settings` message; both default true).
+- Players pick their pet in the lobby (`components/pets/PetPicker.tsx`,
+  mirroring ColorPicker): the choice persists locally (`PlayerInfo.petId`),
+  is announced via presence, and conflicts resolve deterministically by
+  join order in `assignPetSpecies` (unrequested players keep their
+  id-hash default).
 - `components/pets/PetLayer.tsx` (default export, no props): fixed overlay
   (2D view only) animating one pixel pet per player — wandering, dashing to
   helped cells (`pet-help` fx), panicking on `disaster` fx, and playing

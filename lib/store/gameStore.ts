@@ -23,8 +23,10 @@ import {
   getOrCreateLocalPlayerId,
   loadPlayerName,
   loadPreferredColor,
+  loadPreferredPet,
   savePlayerName,
   savePreferredColor,
+  savePreferredPet,
 } from "./localPlayer";
 import {
   addXp,
@@ -135,6 +137,7 @@ function initialLocalPlayer(): PlayerInfo | null {
     name,
     color: loadPreferredColor() ?? PLAYER_COLORS[0],
     isHost: false,
+    petId: loadPreferredPet() ?? undefined,
   };
 }
 
@@ -161,6 +164,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         name,
         color: prev?.color ?? loadPreferredColor() ?? PLAYER_COLORS[0],
         isHost: prev?.isHost ?? false,
+        petId: prev?.petId ?? loadPreferredPet() ?? undefined,
       },
     });
   },
@@ -179,6 +183,26 @@ export const useGameStore = create<GameStore>()((set, get) => ({
             game: {
               ...game,
               players: game.players.map((p) => (p.id === me.id ? { ...p, color } : p)),
+            },
+          }
+        : {}),
+    });
+  },
+
+  setLocalPlayerPet: (petId) => {
+    savePreferredPet(petId);
+    const { localPlayer, game } = get();
+    if (!localPlayer) return;
+    const me = { ...localPlayer, petId };
+    set({
+      localPlayer: me,
+      // Same shape as setLocalPlayerColor: local roster entry updates
+      // immediately, presence announces it to the room.
+      ...(game
+        ? {
+            game: {
+              ...game,
+              players: game.players.map((p) => (p.id === me.id ? { ...p, petId } : p)),
             },
           }
         : {}),

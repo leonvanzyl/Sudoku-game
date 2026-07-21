@@ -309,11 +309,17 @@ export function petHash(s: string): number {
   return h >>> 0;
 }
 
+/** True when `id` names a species in the catalog. */
+export function isPetSpeciesId(id: unknown): id is string {
+  return typeof id === "string" && PET_SPECIES.some((s) => s.id === id);
+}
+
 /**
  * Deterministic, room-unique species assignment: walk the roster in join
  * order (the order is host-synced, so identical on every client) and give
- * each player the species their id hashes to, probing forward past species
- * already taken. Falls back to reuse only with more players than species.
+ * each player their requested species (PlayerInfo.petId) when free, else
+ * the species their id hashes to, probing forward past species already
+ * taken. Falls back to reuse only with more players than species.
  */
 export function assignPetSpecies(
   players: readonly PlayerInfo[],
@@ -321,7 +327,11 @@ export function assignPetSpecies(
   const taken = new Set<number>();
   const out = new Map<string, PetSpecies>();
   for (const p of players) {
-    const start = petHash(p.id) % PET_SPECIES.length;
+    const wanted = isPetSpeciesId(p.petId)
+      ? PET_SPECIES.findIndex((s) => s.id === p.petId)
+      : -1;
+    const start =
+      wanted >= 0 && !taken.has(wanted) ? wanted : petHash(p.id) % PET_SPECIES.length;
     let idx = start;
     for (let step = 0; step < PET_SPECIES.length; step++) {
       const candidate = (start + step) % PET_SPECIES.length;

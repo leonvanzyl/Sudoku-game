@@ -48,3 +48,15 @@ export function loadPreferredColor(): string | null {
 export function savePreferredColor(color: string): void {
   storage()?.setItem(COLOR_KEY, color);
 }
+
+const PET_KEY = "sudoku:player-pet";
+
+/** The player's chosen pet species id, or null if never picked / on the server. */
+export function loadPreferredPet(): string | null {
+  return storage()?.getItem(PET_KEY) ?? null;
+}
+
+/** Persist the player's chosen pet species id. No-op on the server. */
+export function savePreferredPet(petId: string): void {
+  storage()?.setItem(PET_KEY, petId);
+}

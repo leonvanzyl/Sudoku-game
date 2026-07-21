@@ -19,6 +19,7 @@ import {
 import { useGameStore } from "@/lib/store/gameStore";
 import { getAblyClient } from "@/lib/realtime/ablyClient";
 import { fxBus } from "@/lib/fx/bus";
+import { isPetSpeciesId } from "@/lib/pets/catalog";
 
 /** Host absent from presence for longer than this => session is over. */
 const HOST_LEFT_GRACE_MS = 10_000;
@@ -124,6 +125,8 @@ export interface UseGameChannelResult {
    * announces via presence so the host re-resolves and rebroadcasts.
    */
   setPlayerColor: (color: string) => Promise<void>;
+  /** Change the local player's pet species — same flow as setPlayerColor. */
+  setPlayerPet: (petId: string) => Promise<void>;
   connectionStatus: ConnectionStatus;
   /** True once the session was terminated (host left / end-session). */
   sessionEnded: boolean;
@@ -196,6 +199,25 @@ export function useGameChannel(
       } catch {
         // presence not entered yet / offline — the local update stands and
         // the next presence enter carries the persisted color anyway
+      }
+    },
+    [code, enabled],
+  );
+
+  const setPlayerPet = useCallback(
+    async (petId: string): Promise<void> => {
+      const store = useGameStore.getState();
+      store.setLocalPlayerPet(petId);
+      if (!enabled || typeof window === "undefined" || !code) return;
+      const me = useGameStore.getState().localPlayer;
+      if (!me) return;
+      try {
+        await getAblyClient(me.id)
+          .channels.get(channelName(code))
+          .presence.update(me);
+      } catch {
+        // presence not entered yet / offline — the local update stands and
+        // the next presence enter carries the persisted pet anyway
       }
     },
     [code, enabled],
@@ -483,6 +505,9 @@ export function useGameChannel(
           name: typeof d.name === "string" ? d.name : "Player",
           color,
           isHost: m.clientId === hostClientIdRef.current,
+          // Requested pet rides along; uniqueness is resolved at render
+          // time by assignPetSpecies (deterministic by join order).
+          ...(isPetSpeciesId(d.petId) ? { petId: d.petId } : {}),
         };
       });
 
@@ -587,5 +612,12 @@ export function useGameChannel(
     };
   }, [code, localPlayerId, publish, endSessionLocally, enabled]);
 
-  return { publish, endSession, setPlayerColor, connectionStatus, sessionEnded };
+  return {
+    publish,
+    endSession,
+    setPlayerColor,
+    setPlayerPet,
+    connectionStatus,
+    sessionEnded,
+  };
 }

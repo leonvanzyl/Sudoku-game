@@ -90,7 +90,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   /* Solo practice (?solo=1, passed down from the page's searchParams):
    * no realtime at all — messages loop straight back into the store. */
   const channel = useGameChannel(code, { enabled: !solo });
-  const { connectionStatus, sessionEnded, setPlayerColor } = channel;
+  const { connectionStatus, sessionEnded, setPlayerColor, setPlayerPet } = channel;
 
   /** Solo loopback: apply the message locally instead of publishing. */
   const soloDispatch = useCallback(async (msg: GameMessage): Promise<void> => {
@@ -413,6 +413,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
           starting={startPending}
           connectionStatus={connectionStatus}
           onPickColor={(c) => void setPlayerColor(c)}
+          onPickPet={(id) => void setPlayerPet(id)}
         />
         <FxLayer />
       </>

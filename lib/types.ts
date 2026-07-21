@@ -32,6 +32,12 @@ export interface PlayerInfo {
   name: string;
   color: string; // hex, assigned from PLAYER_COLORS by join order
   isHost: boolean;
+  /**
+   * Requested pet species id (lib/pets/catalog). Optional; conflicts are
+   * resolved deterministically by join order in assignPetSpecies, so two
+   * players never end up with the same pet.
+   */
+  petId?: string;
 }
 
 /** One cell of the shared co-op board. */
@@ -181,6 +187,8 @@ export interface GameStore {
   setLocalPlayer: (name: string) => void; // creates/loads id, sets name
   /** Persist + apply the player's chosen color (from PLAYER_COLORS). */
   setLocalPlayerColor: (color: string) => void;
+  /** Persist + apply the player's chosen pet species (from PET_SPECIES). */
+  setLocalPlayerPet: (petId: string) => void;
 
   // --- connection/session ---
   connectionStatus: "idle" | "connecting" | "connected" | "error";
