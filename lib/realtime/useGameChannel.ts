@@ -18,6 +18,7 @@ import {
 } from "@/lib/types";
 import { useGameStore } from "@/lib/store/gameStore";
 import { getAblyClient } from "@/lib/realtime/ablyClient";
+import { fxBus } from "@/lib/fx/bus";
 
 /** Host absent from presence for longer than this => session is over. */
 const HOST_LEFT_GRACE_MS = 10_000;
@@ -372,6 +373,21 @@ export function useGameChannel(
           ) {
             hostPublishGameOver(data.playerId, "race-won");
           }
+          break;
+        }
+        case "pet-help": {
+          // Applied like a move, in delivery order; may complete the board.
+          store.applyPetHelp(data.playerId, data.cellIndex, data.value);
+          checkCoopWin();
+          break;
+        }
+        case "disaster": {
+          // Purely cosmetic — straight to the fx bus, nothing in the store.
+          fxBus.emit({ type: "disaster", kind: data.kind });
+          break;
+        }
+        case "fun-settings": {
+          store.applyFunSettings(data.petsEnabled, data.eventsEnabled);
           break;
         }
         case "game-over": {

@@ -13,15 +13,25 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { fxBus } from "@/lib/fx/bus";
-import { PLAYER_COLORS, type FxEvent } from "@/lib/types";
+import { PLAYER_COLORS, type DisasterKind, type FxEvent } from "@/lib/types";
 import { FxEngine, GOLD_COLORS } from "./particles";
 
 const CONFETTI_COLORS = [...PLAYER_COLORS, "#facc15", "#ffffff"] as const;
+const BLIZZARD_COLORS = ["#ffffff", "#e0f2fe", "#bae6fd", "#93c5fd"] as const;
 const SHAKE_CLASS = "fx-shake";
 const SHAKE_MS = 400;
 const VICTORY_CONFETTI_MS = 4500;
 const VICTORY_BANNER_MS = 5500;
 const DEFEAT_MS = 3200;
+const DISASTER_TOAST_MS = 3400;
+
+const DISASTER_META: Record<DisasterKind, { emoji: string; label: string }> = {
+  earthquake: { emoji: "🌋", label: "Earthquake!" },
+  "meteor-shower": { emoji: "☄️", label: "Meteor shower!" },
+  blizzard: { emoji: "❄️", label: "Blizzard!" },
+  tornado: { emoji: "🌪️", label: "Tornado!" },
+  lightning: { emoji: "⚡", label: "Lightning storm!" },
+};
 
 type Banner =
   | { kind: "victory"; winnerName: string | null }
@@ -71,7 +81,9 @@ export default function FxLayer() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [vignette, setVignette] = useState(false);
   const [dim, setDim] = useState(false);
+  const [flash, setFlash] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
+  const [disaster, setDisaster] = useState<DisasterKind | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -161,6 +173,79 @@ export default function FxLayer() {
           });
           break;
         }
+        case "pet-help": {
+          // The pet itself (PetLayer) dashes over; here just the sparkle.
+          const p = cellPoint(e.cellIndex);
+          engine.sparkle(p.x, p.y, e.color, 10);
+          engine.schedule(220, () => engine.burst(p.x, p.y, e.color, 14, 170));
+          break;
+        }
+        case "disaster": {
+          if (!DISASTER_META[e.kind]) break; // unknown kind from the wire
+          setDisaster(e.kind);
+          later(DISASTER_TOAST_MS, () =>
+            setDisaster((d) => (d === e.kind ? null : d)),
+          );
+          const center = boardCenterPoint();
+          switch (e.kind) {
+            case "earthquake": {
+              // Three shakes with dusty puffs at random cells.
+              for (let k = 0; k < 3; k++) later(k * 450, shake);
+              for (let k = 0; k < 10; k++) {
+                engine.schedule(k * 130, () => {
+                  const p = cellPoint(Math.floor(Math.random() * 81));
+                  engine.puff(p.x, p.y, "#a8a29e");
+                });
+              }
+              break;
+            }
+            case "meteor-shower": {
+              for (let k = 0; k < 14; k++) {
+                engine.schedule(k * 170 + Math.random() * 90, () => {
+                  const x = Math.random() * (window.innerWidth + 300);
+                  engine.meteor(x, -20);
+                });
+              }
+              break;
+            }
+            case "blizzard": {
+              engine.confetti(4200, BLIZZARD_COLORS);
+              break;
+            }
+            case "tornado": {
+              // Sparkle spiral winding outward from the board center.
+              for (let k = 0; k < 36; k++) {
+                engine.schedule(k * 65, () => {
+                  const a = k * 0.55;
+                  const rad = 16 + k * 5;
+                  engine.sparkle(
+                    center.x + Math.cos(a) * rad,
+                    center.y + Math.sin(a) * rad * 0.7,
+                    "#a5f3fc",
+                    3,
+                  );
+                });
+              }
+              later(500, shake);
+              break;
+            }
+            case "lightning": {
+              // Two quick white flashes with spark bursts up top.
+              setFlash(true);
+              later(90, () => setFlash(false));
+              later(260, () => setFlash(true));
+              later(380, () => setFlash(false));
+              for (let k = 0; k < 3; k++) {
+                engine.schedule(k * 140, () => {
+                  const x = window.innerWidth * (0.2 + Math.random() * 0.6);
+                  engine.sparkle(x, window.innerHeight * 0.12, "#fef9c3", 12);
+                });
+              }
+              break;
+            }
+          }
+          break;
+        }
       }
     };
 
@@ -237,6 +322,17 @@ export default function FxLayer() {
         }}
       />
 
+      {/* White flash (lightning disaster) */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(245, 250, 255, 0.9)",
+          opacity: flash ? 1 : 0,
+          transition: flash ? "opacity 30ms ease-out" : "opacity 180ms ease-in",
+        }}
+      />
+
       {/* Desaturating dim (defeat) */}
       <div
         style={{
@@ -256,6 +352,56 @@ export default function FxLayer() {
         data-fx-canvas=""
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
       />
+
+      {/* Disaster toast */}
+      <div
+        style={{
+          position: "absolute",
+          insetInline: 0,
+          top: "max(4.5rem, calc(env(safe-area-inset-top) + 3.5rem))",
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <AnimatePresence>
+          {disaster && (
+            <motion.div
+              key={disaster}
+              initial={{ opacity: 0, y: -18, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 340, damping: 24 }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.5rem 1.1rem",
+                borderRadius: "0.9rem",
+                background: "rgba(15, 15, 30, 0.8)",
+                border: "1px solid rgba(165, 243, 252, 0.35)",
+                boxShadow: "0 0 30px rgba(165, 243, 252, 0.15), 0 6px 30px rgba(0,0,0,0.5)",
+                backdropFilter: "blur(8px)",
+                WebkitBackdropFilter: "blur(8px)",
+              }}
+            >
+              <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>
+                {DISASTER_META[disaster].emoji}
+              </span>
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  color: "rgba(224, 242, 254, 0.95)",
+                }}
+              >
+                {DISASTER_META[disaster].label}
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Banners */}
       <div

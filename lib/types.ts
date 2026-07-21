@@ -8,6 +8,22 @@ export type GameMode = "coop" | "race";
 export type GamePhase = "lobby" | "playing" | "finished";
 export type ViewMode = "2d" | "3d";
 
+/** Cosmetic random events broadcast by the host mid-game. */
+export type DisasterKind =
+  | "earthquake"
+  | "meteor-shower"
+  | "blizzard"
+  | "tornado"
+  | "lightning";
+
+export const DISASTER_KINDS: DisasterKind[] = [
+  "earthquake",
+  "meteor-shower",
+  "blizzard",
+  "tornado",
+  "lightning",
+];
+
 /** 81-length array, row-major. 0 = empty, 1-9 = value. */
 export type Grid = number[];
 
@@ -49,6 +65,10 @@ export interface SharedGameState {
   raceProgress: RaceProgress[];
   startedAt: number | null; // epoch ms when phase -> playing
   winnerId: string | null;
+  /** Host-toggleable: pixel pets that wander the board and help out. */
+  petsEnabled: boolean;
+  /** Host-toggleable: random cosmetic disaster events. */
+  eventsEnabled: boolean;
 }
 
 // ---------------- Realtime protocol ----------------
@@ -71,6 +91,21 @@ export type GameMessage =
   | { type: "race-progress"; progress: RaceProgress }
   | { type: "race-finished"; playerId: string; elapsedMs: number }
   | { type: "game-over"; winnerId: string | null; reason: "completed" | "race-won" }
+  | {
+      // co-op: host-published — a player's pet fills one empty cell with the
+      // correct value (value always equals solution[cellIndex]).
+      type: "pet-help";
+      playerId: string; // the pet's owner; the entry is attributed to them
+      cellIndex: number;
+      value: number;
+    }
+  | { type: "disaster"; kind: DisasterKind } // host-published cosmetic event
+  | {
+      // host-published when toggling the fun extras mid-game
+      type: "fun-settings";
+      petsEnabled: boolean;
+      eventsEnabled: boolean;
+    }
   | { type: "end-session" }; // host killed the game -> everyone leaves
 
 // ---------------- FX event bus ----------------
@@ -81,7 +116,9 @@ export type FxEvent =
   | { type: "unit-complete"; cells: number[]; color: string } // row/col/box finished
   | { type: "board-complete" } // co-op win / local race board done
   | { type: "victory"; winnerName: string | null } // game over celebration
-  | { type: "defeat" }; // lost the race
+  | { type: "defeat" } // lost the race
+  | { type: "pet-help"; cellIndex: number; ownerId: string; color: string } // a pet filled a cell
+  | { type: "disaster"; kind: DisasterKind }; // random event visuals
 
 export type FxListener = (e: FxEvent) => void;
 
@@ -176,6 +213,16 @@ export interface GameStore {
   applyMove: (playerId: string, cellIndex: number, value: number) => void;
   /** Race: apply another player's progress update. */
   applyRaceProgress: (p: RaceProgress) => void;
+  /** Co-op: apply a host-published pet-help (ALL clients, incl. host). */
+  applyPetHelp: (playerId: string, cellIndex: number, value: number) => void;
+  /**
+   * Race: the local player's pet fills one random empty cell with the
+   * correct value. Returns the race-progress message to publish, or null
+   * (not in a race, board nearly done — pets never steal the endgame).
+   */
+  petAssistLocal: () => GameMessage | null;
+  /** Apply the host's fun-settings toggle (pets / random events). */
+  applyFunSettings: (petsEnabled: boolean, eventsEnabled: boolean) => void;
   /** Mark game over (any mode). */
   setGameOver: (winnerId: string | null) => void;
 

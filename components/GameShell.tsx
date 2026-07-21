@@ -13,6 +13,9 @@ import Timer from "@/components/hud/Timer";
 import NumberPad from "@/components/hud/NumberPad";
 import PlayersPanel from "@/components/hud/PlayersPanel";
 import FxLayer from "@/components/fx/FxLayer";
+import PetLayer from "@/components/pets/PetLayer";
+import { useFunDirector } from "@/lib/pets/useFunDirector";
+import { fxBus } from "@/lib/fx/bus";
 
 const Board3D = dynamic(() => import("@/components/board3d/Board3D"), {
   ssr: false,
@@ -115,6 +118,28 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
       case "race-finished":
         useGameStore.getState().setGameOver(msg.playerId);
         break;
+      case "pet-help": {
+        store.applyPetHelp(msg.playerId, msg.cellIndex, msg.value);
+        const s = useGameStore.getState();
+        const g = s.game;
+        if (g && g.mode === "coop" && g.phase === "playing" && g.winnerId === null) {
+          let done = true;
+          for (let i = 0; i < 81; i++) {
+            if ((g.coopBoard[i]?.value || g.puzzle[i]) !== g.solution[i]) {
+              done = false;
+              break;
+            }
+          }
+          if (done) s.setGameOver(null);
+        }
+        break;
+      }
+      case "disaster":
+        fxBus.emit({ type: "disaster", kind: msg.kind });
+        break;
+      case "fun-settings":
+        store.applyFunSettings(msg.petsEnabled, msg.eventsEnabled);
+        break;
       default:
         // race-progress etc.: already applied locally by inputNumber
         break;
@@ -127,6 +152,24 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
         useGameStore.getState().leaveGame();
       }
     : channel.endSession;
+
+  /* ---- fun extras: schedules pet help + random disasters ---- */
+  useFunDirector(publish);
+
+  /** Host: flip one of the fun-extra switches for everyone. */
+  const toggleFun = useCallback(
+    (which: "pets" | "events") => {
+      const s = useGameStore.getState();
+      const g = s.game;
+      if (!g || !s.isHost) return;
+      const pets = which === "pets" ? !(g.petsEnabled ?? true) : (g.petsEnabled ?? true);
+      const events =
+        which === "events" ? !(g.eventsEnabled ?? true) : (g.eventsEnabled ?? true);
+      s.applyFunSettings(pets, events);
+      void publish({ type: "fun-settings", petsEnabled: pets, eventsEnabled: events });
+    },
+    [publish],
+  );
 
   const game = useGameStore((s) => s.game);
   const isHost = useGameStore((s) => s.isHost);
@@ -421,6 +464,40 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
     </div>
   );
 
+  /* Host-only switches for the fun extras (pets / random events). */
+  const petsOn = game.petsEnabled ?? true;
+  const eventsOn = game.eventsEnabled ?? true;
+  const funToggles = isHost ? (
+    <div className="flex overflow-hidden rounded-xl border border-white/10 bg-black/30">
+      <button
+        type="button"
+        onClick={() => toggleFun("pets")}
+        title={`Pixel pets: ${petsOn ? "ON" : "OFF"} — click to ${petsOn ? "disable" : "enable"} for everyone`}
+        aria-pressed={petsOn}
+        className={`px-2.5 py-1.5 text-[13px] leading-none transition ${
+          petsOn
+            ? "bg-emerald-400/15 shadow-[inset_0_0_14px_-6px_#34d399]"
+            : "bg-transparent opacity-35 grayscale hover:opacity-60"
+        }`}
+      >
+        🐾
+      </button>
+      <button
+        type="button"
+        onClick={() => toggleFun("events")}
+        title={`Random events: ${eventsOn ? "ON" : "OFF"} — click to ${eventsOn ? "disable" : "enable"} for everyone`}
+        aria-pressed={eventsOn}
+        className={`px-2.5 py-1.5 text-[13px] leading-none transition ${
+          eventsOn
+            ? "bg-cyan-400/15 shadow-[inset_0_0_14px_-6px_#22d3ee]"
+            : "bg-transparent opacity-35 grayscale hover:opacity-60"
+        }`}
+      >
+        🌪️
+      </button>
+    </div>
+  ) : null;
+
   const endOrLeaveButton = isHost ? (
     <button
       type="button"
@@ -460,6 +537,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
             <Timer startedAt={game.startedAt} running={game.phase === "playing"} />
             {connectionDot}
             <div className="ml-auto flex items-center gap-2">
+              {funToggles}
               {viewToggle}
               {endOrLeaveButton}
             </div>
@@ -488,6 +566,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
               {connectionDot}
             </div>
             <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1.5">
+              {funToggles}
               <button
                 type="button"
                 onClick={() => setShowPlayers((v) => !v)}
@@ -557,6 +636,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
         </main>
       )}
 
+      <PetLayer />
       <FxLayer />
 
       {/* ---------- confirm end session ---------- */}

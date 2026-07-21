@@ -211,6 +211,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       raceProgress: [],
       startedAt: null,
       winnerId: null,
+      petsEnabled: true,
+      eventsEnabled: true,
     };
     recordedGameCode = null;
     set({
@@ -224,6 +226,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   applyStateSync: (state) => {
+    // Snapshots from before the fun-extras flags existed default them on.
+    state = {
+      ...state,
+      petsEnabled: state.petsEnabled ?? true,
+      eventsEnabled: state.eventsEnabled ?? true,
+    };
     const { game, localPlayer, isHost } = get();
     const isNewGame = !game || game.code !== state.code;
     // A finished game never reverts to a live one: a snapshot composed in the
@@ -416,6 +424,92 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     // Own progress is authoritative locally; ignore echoes of our messages.
     if (localPlayer && p.playerId === localPlayer.id) return;
     set({ game: { ...game, raceProgress: upsertProgress(game.raceProgress, p) } });
+  },
+
+  applyPetHelp: (playerId, cellIndex, value) => {
+    const { game } = get();
+    if (!game || game.mode !== "coop" || game.phase !== "playing") return;
+    if (!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex > 80) return;
+    if (game.puzzle[cellIndex] !== 0) return;
+    const cell = game.coopBoard[cellIndex];
+    // Pets only fill cells still empty on arrival (a player may have raced
+    // the pet to it in delivery order) and never place a wrong value.
+    if (!cell || cell.locked || cell.value !== 0) return;
+    if (value !== game.solution[cellIndex]) return;
+
+    const before = gridOf(game.coopBoard);
+    const nextBoard = game.coopBoard.slice();
+    nextBoard[cellIndex] = { value, byPlayer: playerId, locked: true };
+    const after = gridOf(nextBoard);
+    set({ game: { ...game, coopBoard: nextBoard } });
+
+    const color =
+      game.players.find((p) => p.id === playerId)?.color ?? PLAYER_COLORS[0];
+    fxBus.emit({ type: "pet-help", cellIndex, ownerId: playerId, color });
+    for (const cells of newlyCompletedUnits(before, after, game.solution)) {
+      fxBus.emit({ type: "unit-complete", cells, color });
+    }
+    if (isComplete(after, game.solution)) {
+      fxBus.emit({ type: "board-complete" });
+    }
+  },
+
+  petAssistLocal: () => {
+    const { game, localPlayer } = get();
+    if (!game || !localPlayer || game.mode !== "race" || game.phase !== "playing") {
+      return null;
+    }
+    const board = get().localBoard;
+    const empty: number[] = [];
+    for (let i = 0; i < 81; i++) {
+      const cell = board[i];
+      if (game.puzzle[i] === 0 && cell && !cell.locked && cell.value === 0) {
+        empty.push(i);
+      }
+    }
+    // Pets never steal the endgame — leave the last few cells to the human.
+    if (empty.length <= 3) return null;
+    const i = empty[Math.floor(Math.random() * empty.length)];
+    const value = game.solution[i];
+
+    const before = gridOf(board);
+    const nextBoard = board.slice();
+    nextBoard[i] = { value, byPlayer: localPlayer.id, locked: true };
+    const after = gridOf(nextBoard);
+
+    fxBus.emit({
+      type: "pet-help",
+      cellIndex: i,
+      ownerId: localPlayer.id,
+      color: localPlayer.color,
+    });
+    for (const cells of newlyCompletedUnits(before, after, game.solution)) {
+      fxBus.emit({ type: "unit-complete", cells, color: localPlayer.color });
+    }
+
+    const prev = game.raceProgress.find((p) => p.playerId === localPlayer.id);
+    const correctCount = after.reduce(
+      (n, v, idx) =>
+        n + (game.puzzle[idx] === 0 && v !== 0 && v === game.solution[idx] ? 1 : 0),
+      0,
+    );
+    const progress: RaceProgress = {
+      playerId: localPlayer.id,
+      correctCount,
+      mistakes: prev?.mistakes ?? 0,
+      finishedAtMs: prev?.finishedAtMs ?? null,
+    };
+    set({
+      localBoard: nextBoard,
+      game: { ...game, raceProgress: upsertProgress(game.raceProgress, progress) },
+    });
+    return { type: "race-progress", progress };
+  },
+
+  applyFunSettings: (petsEnabled, eventsEnabled) => {
+    const { game } = get();
+    if (!game) return;
+    set({ game: { ...game, petsEnabled, eventsEnabled } });
   },
 
   setGameOver: (winnerId) => {

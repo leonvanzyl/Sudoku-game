@@ -151,6 +151,50 @@ export class FxEngine {
     this.burst(x, y, color, 8, 110);
   }
 
+  /** Diagonal glowing streak falling from the top (meteor-shower). */
+  meteor(x: number, y: number): void {
+    const vx = rand(-300, -160);
+    const vy = rand(420, 560);
+    // Head.
+    this.push({
+      x,
+      y,
+      vx,
+      vy,
+      life: rand(0.9, 1.3),
+      maxLife: 1.3,
+      size: rand(3.5, 5.5),
+      rot: 0,
+      vr: 0,
+      color: pick(["#fdba74", "#fb923c", "#fde68a"] as const),
+      shape: "dot",
+      gravity: 60,
+      drag: 0,
+      glow: 14,
+      phase: 0,
+    });
+    // Short trailing embers behind the head.
+    for (let i = 1; i <= 5; i++) {
+      this.push({
+        x: x - (vx / 60) * i * 0.9,
+        y: y - (vy / 60) * i * 0.9,
+        vx: vx * 0.92,
+        vy: vy * 0.92,
+        life: rand(0.35, 0.7),
+        maxLife: 0.7,
+        size: rand(1.2, 2.6),
+        rot: 0,
+        vr: 0,
+        color: pick(GOLD_COLORS),
+        shape: "dot",
+        gravity: 40,
+        drag: 0,
+        glow: 6,
+        phase: 0,
+      });
+    }
+  }
+
   /** Start a confetti rain for `durationMs` (victory). */
   confetti(durationMs: number, colors: readonly string[]): void {
     this.confettiUntil = this.t + durationMs / 1000;

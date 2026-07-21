@@ -32,6 +32,7 @@ All shared types live in `lib/types.ts`. **Never redefine them.**
 | ui-2d    | `app/layout.tsx`, `app/page.tsx`, `app/game/[code]/page.tsx`, `app/globals.css`, `components/board2d/*`, `components/lobby/*`, `components/hud/*`, `components/GameShell.tsx` |
 | ui-3d    | `components/board3d/*` |
 | fx       | `lib/fx/*` (bus.ts), `components/fx/*` |
+| pets     | `lib/pets/*` (catalog.ts, useFunDirector.ts, pets.test.ts), `components/pets/*` |
 
 ## Module APIs
 
@@ -108,6 +109,22 @@ Must not import from `components/board2d`.
   Needs cell → screen position: board cells carry `data-cell-index`
   attributes (2D) — FxLayer queries `[data-cell-index="i"]` for coords;
   in 3D mode fall back to centered bursts.
+
+### pets — fun extras (pixel pets + random events)
+- `lib/pets/catalog.ts`: pixel sprite data (10×10, 2 frames, player-color
+  accent pixels), deterministic room-unique species assignment by player id,
+  stable pet names. Pure; canvas rendering client-guarded.
+- `lib/pets/useFunDirector.ts`: `useFunDirector(publish)` — mounted by
+  GameShell; schedules `pet-help` (host in co-op; each client locally via
+  `petAssistLocal` in race) and `disaster` messages (host). Respects the
+  host-toggleable `petsEnabled` / `eventsEnabled` flags in SharedGameState
+  (toggled live via the `fun-settings` message; both default true).
+- `components/pets/PetLayer.tsx` (default export, no props): fixed overlay
+  (2D view only) animating one pixel pet per player — wandering, dashing to
+  helped cells (`pet-help` fx), panicking on `disaster` fx, and playing
+  proximity interactions (hearts/duets/naps; purely local flavor).
+- Pet help fills only empty cells with the correct value, attributed to the
+  pet's owner, and never touches the last 3 empty cells.
 
 ## Conventions
 - All interactive components: `"use client"`.
