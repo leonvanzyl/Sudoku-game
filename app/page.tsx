@@ -3,7 +3,9 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
+import ColorPicker from "@/components/ColorPicker";
 import HowToPlay from "@/components/HowToPlay";
+import { loadPreferredColor } from "@/lib/store/localPlayer";
 import {
   DIFFICULTIES,
   INVITE_CODE_ALPHABET,
@@ -98,6 +100,7 @@ export default function Home() {
   const router = useRouter();
   const localPlayer = useGameStore((s) => s.localPlayer);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
+  const setLocalPlayerColor = useGameStore((s) => s.setLocalPlayerColor);
   const progression = useGameStore((s) => s.progression);
 
   const mounted = useMounted();
@@ -109,6 +112,7 @@ export default function Home() {
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [nameError, setNameError] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
+  const [colorDraft, setColorDraft] = useState<string | null>(null);
 
   const name = nameDraft ?? (mounted ? (localPlayer?.name ?? "") : "");
   const trimmedName = name.trim();
@@ -223,6 +227,17 @@ export default function Home() {
         {nameError && (
           <p className="mt-2 text-xs text-red-400">Enter a name first — your team needs to know who you are.</p>
         )}
+        <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.35em] text-white/50">
+          Your color
+        </p>
+        <ColorPicker
+          className="mt-2"
+          value={colorDraft ?? (mounted ? (localPlayer?.color ?? loadPreferredColor()) : null)}
+          onChange={(c) => {
+            setColorDraft(c);
+            setLocalPlayerColor(c);
+          }}
+        />
       </motion.div>
 
       {/* -------- Panels -------- */}

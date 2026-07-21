@@ -22,7 +22,9 @@ import { fxBus } from "@/lib/fx/bus";
 import {
   getOrCreateLocalPlayerId,
   loadPlayerName,
+  loadPreferredColor,
   savePlayerName,
+  savePreferredColor,
 } from "./localPlayer";
 import {
   addXp,
@@ -131,7 +133,7 @@ function initialLocalPlayer(): PlayerInfo | null {
   return {
     id: getOrCreateLocalPlayerId(),
     name,
-    color: PLAYER_COLORS[0],
+    color: loadPreferredColor() ?? PLAYER_COLORS[0],
     isHost: false,
   };
 }
@@ -157,9 +159,29 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       localPlayer: {
         id,
         name,
-        color: prev?.color ?? PLAYER_COLORS[0],
+        color: prev?.color ?? loadPreferredColor() ?? PLAYER_COLORS[0],
         isHost: prev?.isHost ?? false,
       },
+    });
+  },
+
+  setLocalPlayerColor: (color) => {
+    savePreferredColor(color);
+    const { localPlayer, game } = get();
+    if (!localPlayer) return;
+    const me = { ...localPlayer, color };
+    set({
+      localPlayer: me,
+      // Update our own roster entry immediately (the realtime layer
+      // separately announces the change via presence for other clients).
+      ...(game
+        ? {
+            game: {
+              ...game,
+              players: game.players.map((p) => (p.id === me.id ? { ...p, color } : p)),
+            },
+          }
+        : {}),
     });
   },
 
@@ -176,7 +198,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       throw new Error("createGame requires setLocalPlayer to have been called");
     }
     const { puzzle, solution } = generatePuzzle(difficulty);
-    const host: PlayerInfo = { ...local, color: PLAYER_COLORS[0], isHost: true };
+    const host: PlayerInfo = { ...local, isHost: true };
     const state: SharedGameState = {
       code: generateInviteCode(),
       mode,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import ColorPicker from "@/components/ColorPicker";
 import { useGameStore } from "@/lib/store/gameStore";
 import type { GameStore } from "@/lib/types";
 
@@ -18,16 +19,27 @@ export interface LobbyViewProps {
   onStart: () => void;
   starting: boolean;
   connectionStatus: GameStore["connectionStatus"];
+  /** Change the local player's color (announced to the room). */
+  onPickColor: (color: string) => void;
 }
 
 /** Pre-game lobby: invite code, roster, settings summary, start control. */
-export default function LobbyView({ onStart, starting, connectionStatus }: LobbyViewProps) {
+export default function LobbyView({
+  onStart,
+  starting,
+  connectionStatus,
+  onPickColor,
+}: LobbyViewProps) {
   const game = useGameStore((s) => s.game);
   const isHost = useGameStore((s) => s.isHost);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const [copied, setCopied] = useState(false);
 
   if (!game) return null;
+
+  const takenColors = new Set(
+    game.players.filter((p) => p.id !== localPlayer?.id).map((p) => p.color),
+  );
 
   const copyCode = async () => {
     try {
@@ -176,6 +188,17 @@ export default function LobbyView({ onStart, starting, connectionStatus }: Lobby
             ))}
           </AnimatePresence>
         </ul>
+        <div className="mt-4 border-t border-white/[0.07] pt-4">
+          <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-white/45">
+            your color
+          </p>
+          <ColorPicker
+            className="mt-2.5"
+            value={localPlayer?.color ?? null}
+            taken={takenColors}
+            onChange={onPickColor}
+          />
+        </div>
       </div>
 
       {isHost ? (

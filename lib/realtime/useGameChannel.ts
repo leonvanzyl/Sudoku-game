@@ -118,6 +118,11 @@ export interface UseGameChannelResult {
   publish: (msg: GameMessage) => Promise<void>;
   /** Host only: broadcast end-session, then leave the room locally. */
   endSession: () => Promise<void>;
+  /**
+   * Change the local player's color: applies locally + persists, then
+   * announces via presence so the host re-resolves and rebroadcasts.
+   */
+  setPlayerColor: (color: string) => Promise<void>;
   connectionStatus: ConnectionStatus;
   /** True once the session was terminated (host left / end-session). */
   sessionEnded: boolean;
@@ -172,6 +177,25 @@ export function useGameChannel(
       if (!lp) return;
       const channel = getAblyClient(lp.id).channels.get(channelName(code));
       await channel.publish(msg.type, msg);
+    },
+    [code, enabled],
+  );
+
+  const setPlayerColor = useCallback(
+    async (color: string): Promise<void> => {
+      const store = useGameStore.getState();
+      store.setLocalPlayerColor(color);
+      if (!enabled || typeof window === "undefined" || !code) return;
+      const me = useGameStore.getState().localPlayer;
+      if (!me) return;
+      try {
+        await getAblyClient(me.id)
+          .channels.get(channelName(code))
+          .presence.update(me);
+      } catch {
+        // presence not entered yet / offline — the local update stands and
+        // the next presence enter carries the persisted color anyway
+      }
     },
     [code, enabled],
   );
@@ -411,27 +435,33 @@ export function useGameChannel(
         (a, b) =>
           (joinOrder.get(a.clientId) ?? 0) - (joinOrder.get(b.clientId) ?? 0),
       );
-      // Colors: keep whatever the authoritative game state already assigned
-      // (stable across presence churn and host refresh); new players get the
-      // first unused color, falling back to join-order assignment.
+      // Colors: a player's presence-declared choice wins when free; ties go
+      // to join order (earlier player keeps the color, later one falls back
+      // to their previous color or the first unused). This keeps colors
+      // stable across churn while letting players change theirs live.
       const existingColors = new Map<string, string>(
         (useGameStore.getState().game?.players ?? []).map((p) => [p.id, p.color]),
       );
-      const inUse = new Set<string>(
-        ordered
-          .map((m) => existingColors.get(m.clientId))
-          .filter((c): c is string => typeof c === "string"),
-      );
+      const palette = PLAYER_COLORS as readonly string[];
+      const taken = new Set<string>();
       const players: PlayerInfo[] = ordered.map((m) => {
         const d = (m.data ?? {}) as Partial<PlayerInfo>;
         const idx = joinOrder.get(m.clientId) ?? 0;
-        let color = existingColors.get(m.clientId);
+        const wanted =
+          typeof d.color === "string" && palette.includes(d.color) ? d.color : undefined;
+        const previous = existingColors.get(m.clientId);
+        let color: string | undefined;
+        for (const candidate of [wanted, previous]) {
+          if (candidate && !taken.has(candidate)) {
+            color = candidate;
+            break;
+          }
+        }
         if (!color) {
           color =
-            PLAYER_COLORS.find((c) => !inUse.has(c)) ??
-            PLAYER_COLORS[idx % PLAYER_COLORS.length];
-          inUse.add(color);
+            palette.find((c) => !taken.has(c)) ?? palette[idx % palette.length];
         }
+        taken.add(color);
         return {
           id: typeof d.id === "string" ? d.id : m.clientId,
           name: typeof d.name === "string" ? d.name : "Player",
@@ -541,5 +571,5 @@ export function useGameChannel(
     };
   }, [code, localPlayerId, publish, endSessionLocally, enabled]);
 
-  return { publish, endSession, connectionStatus, sessionEnded };
+  return { publish, endSession, setPlayerColor, connectionStatus, sessionEnded };
 }

@@ -142,6 +142,8 @@ export interface GameStore {
   // --- identity ---
   localPlayer: PlayerInfo | null; // set after name entry
   setLocalPlayer: (name: string) => void; // creates/loads id, sets name
+  /** Persist + apply the player's chosen color (from PLAYER_COLORS). */
+  setLocalPlayerColor: (color: string) => void;
 
   // --- connection/session ---
   connectionStatus: "idle" | "connecting" | "connected" | "error";
