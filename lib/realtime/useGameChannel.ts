@@ -229,15 +229,24 @@ export function useGameChannel(code: string): UseGameChannelResult {
         // Re-check presence: the host may have rejoined within the grace
         // period (e.g. page refresh / transient disconnect).
         let hostPresent = false;
+        let checked = false;
         try {
           const members = await channel.presence.get();
           hostPresent = members.some(
             (m) => m.clientId === hostClientIdRef.current,
           );
+          checked = true;
         } catch {
-          hostPresent = false;
+          // presence.get() failing means OUR connection is flaky, not that
+          // the host is gone — never terminate on an unverified check.
         }
-        if (disposed || sessionEndedRef.current || hostPresent) return;
+        if (disposed || sessionEndedRef.current) return;
+        if (!checked) {
+          // Re-arm and try again once our channel recovers.
+          startWatchdog();
+          return;
+        }
+        if (hostPresent) return;
         endSessionLocally();
       }, HOST_LEFT_GRACE_MS);
     };
@@ -305,14 +314,18 @@ export function useGameChannel(code: string): UseGameChannelResult {
             const existing = store.game?.raceProgress.find(
               (p: RaceProgress) => p.playerId === data.playerId,
             );
-            const finished: RaceProgress = existing
-              ? { ...existing, finishedAtMs: data.elapsedMs }
-              : {
-                  playerId: data.playerId,
-                  correctCount: 0,
-                  mistakes: 0,
-                  finishedAtMs: data.elapsedMs,
-                };
+            // A finished board has every non-given cell correct, so the
+            // finisher's correctCount is exactly the number of blanks —
+            // don't leave it at the last (stale) race-progress value.
+            const totalBlanks =
+              store.game?.puzzle.reduce((n, v) => n + (v === 0 ? 1 : 0), 0) ??
+              0;
+            const finished: RaceProgress = {
+              playerId: data.playerId,
+              correctCount: totalBlanks || (existing?.correctCount ?? 0),
+              mistakes: existing?.mistakes ?? 0,
+              finishedAtMs: data.elapsedMs,
+            };
             store.applyRaceProgress(finished);
           }
           // Host: first race-finished in delivery order wins the race.
@@ -333,6 +346,9 @@ export function useGameChannel(code: string): UseGameChannelResult {
           break;
         }
         case "end-session": {
+          // Ignore our own echo: the ending host has already torn down via
+          // endSession() (isHost is false again by the time the echo lands).
+          if (msg.clientId === localPlayer.id) break;
           if (!store.isHost) {
             clearWatchdog();
             endSessionLocally();
@@ -369,7 +385,16 @@ export function useGameChannel(code: string): UseGameChannelResult {
       for (const m of unique) {
         if (!joinOrder.has(m.clientId)) joinOrder.set(m.clientId, joinOrder.size);
       }
-      if (hostClientIdRef.current === null && unique.length > 0) {
+      // Host identity: prefer the member whose presence data is flagged as
+      // host (the creator — or the creator re-entering after a page refresh
+      // with restored state). Timestamp order alone would elect the
+      // longest-present JOINER after a host refresh, stranding the session.
+      const flagged = unique.find(
+        (m) => (m.data as Partial<PlayerInfo> | null | undefined)?.isHost === true,
+      );
+      if (flagged) {
+        hostClientIdRef.current = flagged.clientId;
+      } else if (hostClientIdRef.current === null && unique.length > 0) {
         hostClientIdRef.current = unique[0].clientId;
       }
 
@@ -377,18 +402,43 @@ export function useGameChannel(code: string): UseGameChannelResult {
         (a, b) =>
           (joinOrder.get(a.clientId) ?? 0) - (joinOrder.get(b.clientId) ?? 0),
       );
+      // Colors: keep whatever the authoritative game state already assigned
+      // (stable across presence churn and host refresh); new players get the
+      // first unused color, falling back to join-order assignment.
+      const existingColors = new Map<string, string>(
+        (useGameStore.getState().game?.players ?? []).map((p) => [p.id, p.color]),
+      );
+      const inUse = new Set<string>(
+        ordered
+          .map((m) => existingColors.get(m.clientId))
+          .filter((c): c is string => typeof c === "string"),
+      );
       const players: PlayerInfo[] = ordered.map((m) => {
         const d = (m.data ?? {}) as Partial<PlayerInfo>;
         const idx = joinOrder.get(m.clientId) ?? 0;
+        let color = existingColors.get(m.clientId);
+        if (!color) {
+          color =
+            PLAYER_COLORS.find((c) => !inUse.has(c)) ??
+            PLAYER_COLORS[idx % PLAYER_COLORS.length];
+          inUse.add(color);
+        }
         return {
           id: typeof d.id === "string" ? d.id : m.clientId,
           name: typeof d.name === "string" ? d.name : "Player",
-          color: PLAYER_COLORS[idx % PLAYER_COLORS.length],
+          color,
           isHost: m.clientId === hostClientIdRef.current,
         };
       });
 
-      useGameStore.getState().setPlayers(players);
+      // The host is authoritative for the player list (and thus colors):
+      // once a game exists, non-hosts take players from the host's
+      // state-sync instead of their own presence view, whose private
+      // join-order map diverges after presence churn (leave + rejoin).
+      const st = useGameStore.getState();
+      if (st.isHost || !st.game || st.game.players.length === 0) {
+        st.setPlayers(players);
+      }
 
       // Host rebroadcasts authoritative state on every presence change.
       const after = useGameStore.getState();
@@ -425,8 +475,11 @@ export function useGameChannel(code: string): UseGameChannelResult {
         .setConnectionStatus(mapConnectionState(client.connection.state));
       client.connection.on(handleConnection);
       // subscribe() implicitly attaches; all of these are idempotent, so a
-      // strict-mode double mount is safe.
+      // strict-mode double mount is safe. Re-check `disposed` after every
+      // await: registering a handler after this mount's cleanup already ran
+      // would leak it forever.
       await channel.subscribe(handleMessage);
+      if (disposed) return;
       await channel.presence.subscribe(handlePresence);
       if (disposed) return;
       await channel.presence.enter(localPlayer);
@@ -446,10 +499,36 @@ export function useGameChannel(code: string): UseGameChannelResult {
     return () => {
       disposed = true;
       clearWatchdog();
+      unsubscribePersist();
+      // Leaving via the UI (leaveGame ran, store cleared) means this tab no
+      // longer hosts the game — drop the snapshot. On a hard refresh this
+      // cleanup never runs, which is exactly when the snapshot must survive.
+      if (!useGameStore.getState().game) clearHostSnapshot(code);
       client.connection.off(handleConnection);
       channel.unsubscribe(handleMessage);
       channel.presence.unsubscribe(handlePresence);
-      channel.presence.leave().catch(() => {});
+      channelMounts.set(chanName, Math.max(0, (channelMounts.get(chanName) ?? 1) - 1));
+      channel.presence
+        .leave()
+        .catch(() => {})
+        .finally(() => {
+          // Fully detach + release the channel once no mount uses it, so a
+          // tab that left the game stops receiving the room's traffic. A
+          // strict-mode remount bumps the count synchronously and skips this.
+          if ((channelMounts.get(chanName) ?? 0) > 0) return;
+          channel
+            .detach()
+            .catch(() => {})
+            .finally(() => {
+              if ((channelMounts.get(chanName) ?? 0) === 0) {
+                try {
+                  client.channels.release(chanName);
+                } catch {
+                  // ignore — releasing a non-detached channel can throw
+                }
+              }
+            });
+        });
     };
   }, [code, localPlayerId, publish, endSessionLocally]);
 

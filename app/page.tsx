@@ -327,7 +327,7 @@ export default function Home() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleJoin();
               }}
-              placeholder="ABC123"
+              placeholder="ABC234"
               autoCapitalize="characters"
               autoComplete="off"
               spellCheck={false}

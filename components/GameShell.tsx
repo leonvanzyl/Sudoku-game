@@ -465,7 +465,7 @@ export default function GameShell({ code }: { code: string }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.6 }}
-            className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-6 backdrop-blur-[3px]"
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-6 backdrop-blur-[3px]"
           >
             <motion.div
               initial={{ scale: 0.85, y: 24, opacity: 0 }}
