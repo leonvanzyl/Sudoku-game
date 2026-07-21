@@ -91,6 +91,7 @@ export default function Board2D({ onInput }: Board2DProps) {
 
   return (
     <div
+      data-board-area=""
       className="glass-deep w-full max-w-[min(92vw,560px)] select-none rounded-2xl p-2 sm:p-3"
       role="grid"
       aria-label="Sudoku board"

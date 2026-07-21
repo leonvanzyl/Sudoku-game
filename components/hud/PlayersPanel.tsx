@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/store/gameStore";
 import type { RaceProgress } from "@/lib/types";
@@ -8,24 +7,22 @@ import type { RaceProgress } from "@/lib/types";
 /**
  * Live players panel.
  * Co-op: cells filled per player. Race: per-player progress bars.
+ * (Memoization is left to the React Compiler.)
  */
 export default function PlayersPanel() {
   const game = useGameStore((s) => s.game);
   const localPlayer = useGameStore((s) => s.localPlayer);
 
-  const coopCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    if (game?.mode === "coop") {
-      for (const cell of game.coopBoard) {
-        if (cell.value !== 0 && cell.byPlayer) {
-          counts.set(cell.byPlayer, (counts.get(cell.byPlayer) ?? 0) + 1);
-        }
+  if (!game) return null;
+
+  const coopCounts = new Map<string, number>();
+  if (game.mode === "coop") {
+    for (const cell of game.coopBoard) {
+      if (cell.value !== 0 && cell.byPlayer) {
+        coopCounts.set(cell.byPlayer, (coopCounts.get(cell.byPlayer) ?? 0) + 1);
       }
     }
-    return counts;
-  }, [game?.mode, game?.coopBoard]);
-
-  if (!game) return null;
+  }
 
   const totalToFill = game.puzzle.reduce((acc, v) => acc + (v === 0 ? 1 : 0), 0);
   const progressById = new Map<string, RaceProgress>(

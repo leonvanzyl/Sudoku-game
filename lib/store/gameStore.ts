@@ -19,7 +19,11 @@ import {
 } from "@/lib/types";
 import { generatePuzzle, getCompletedUnits, isComplete } from "@/lib/sudoku";
 import { fxBus } from "@/lib/fx/bus";
-import { getOrCreateLocalPlayerId, savePlayerName } from "./localPlayer";
+import {
+  getOrCreateLocalPlayerId,
+  loadPlayerName,
+  savePlayerName,
+} from "./localPlayer";
 import {
   addXp,
   loadProgression,
@@ -70,6 +74,23 @@ function initialViewMode(): ViewMode {
 }
 
 /**
+ * Rehydrate the persisted { id, name } identity on the client so returning
+ * players are not re-prompted for a name. Null on the server and for
+ * first-time visitors (name entry then goes through setLocalPlayer).
+ */
+function initialLocalPlayer(): PlayerInfo | null {
+  if (typeof window === "undefined") return null;
+  const name = loadPlayerName();
+  if (!name) return null;
+  return {
+    id: getOrCreateLocalPlayerId(),
+    name,
+    color: PLAYER_COLORS[0],
+    isHost: false,
+  };
+}
+
+/**
  * Guard so recordResult runs exactly once per game for the local player,
  * even if setGameOver is invoked multiple times (duplicate game-over
  * messages, host + local detection, etc.). Module-level on purpose: it is
@@ -81,7 +102,7 @@ let recordedGameCode: string | null = null;
 
 export const useGameStore = create<GameStore>()((set, get) => ({
   // --- identity ---
-  localPlayer: null,
+  localPlayer: initialLocalPlayer(),
   setLocalPlayer: (name) => {
     const id = getOrCreateLocalPlayerId();
     savePlayerName(name);

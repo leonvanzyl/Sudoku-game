@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
@@ -67,6 +67,16 @@ function FullScreenNotice({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** True after hydration; false during SSR + the hydration render. */
+const emptySubscribe = () => () => {};
+function useMounted(): boolean {
+  return useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+}
+
 /* ---------------------------------------------------------------- */
 /* GameShell                                                         */
 /* ---------------------------------------------------------------- */
@@ -82,7 +92,7 @@ export default function GameShell({ code }: { code: string }) {
   const viewMode = useGameStore((s) => s.viewMode);
   const setViewMode = useGameStore((s) => s.setViewMode);
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = useMounted();
   const [nameDraft, setNameDraft] = useState("");
   const [starting, setStarting] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -91,9 +101,9 @@ export default function GameShell({ code }: { code: string }) {
 
   const recordedRef = useRef(false);
 
-  useEffect(() => setMounted(true), []);
-
   const phase = game?.phase ?? null;
+  /** Show the spinner-y start button only while we're still in the lobby. */
+  const startPending = starting && phase === "lobby";
 
   /* ---- input plumbing: store decides, we publish what it returns ---- */
   const handleInput = useCallback(
@@ -140,10 +150,6 @@ export default function GameShell({ code }: { code: string }) {
       .catch(() => setStarting(false));
   }, [publish]);
 
-  useEffect(() => {
-    if (phase === "playing") setStarting(false);
-  }, [phase]);
-
   /* ---- session ended by host: park on a modal, then go home ---- */
   useEffect(() => {
     if (!sessionEnded) return;
@@ -155,20 +161,25 @@ export default function GameShell({ code }: { code: string }) {
    * NOTE: progression (recordResult) is handled inside the store's
    * setGameOver — do not record here or XP would double-count. */
   useEffect(() => {
-    if (phase !== "finished" || recordedRef.current) return;
-    const s = useGameStore.getState();
-    const g = s.game;
-    if (!g || !s.localPlayer) return;
-    recordedRef.current = true;
+    if (phase !== "finished") return;
+    // Deferred so the capture happens outside the effect's synchronous body.
+    const id = window.setTimeout(() => {
+      if (recordedRef.current) return;
+      const s = useGameStore.getState();
+      const g = s.game;
+      if (!g || !s.localPlayer) return;
+      recordedRef.current = true;
 
-    const own = g.raceProgress.find((p) => p.playerId === s.localPlayer?.id);
-    const elapsed =
-      g.mode === "race" && own?.finishedAtMs != null
-        ? own.finishedAtMs
-        : g.startedAt != null
-          ? Date.now() - g.startedAt
-          : null;
-    setFinalElapsedMs(elapsed);
+      const own = g.raceProgress.find((p) => p.playerId === s.localPlayer?.id);
+      const elapsed =
+        g.mode === "race" && own?.finishedAtMs != null
+          ? own.finishedAtMs
+          : g.startedAt != null
+            ? Date.now() - g.startedAt
+            : null;
+      setFinalElapsedMs(elapsed);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [phase]);
 
   /* ---- leave / end ---- */
@@ -292,7 +303,7 @@ export default function GameShell({ code }: { code: string }) {
   if (game.phase === "lobby") {
     return (
       <>
-        <LobbyView onStart={handleStart} starting={starting} connectionStatus={connectionStatus} />
+        <LobbyView onStart={handleStart} starting={startPending} connectionStatus={connectionStatus} />
         <FxLayer />
       </>
     );
@@ -385,7 +396,10 @@ export default function GameShell({ code }: { code: string }) {
             className="flex w-full justify-center"
           >
             {viewMode === "3d" ? (
-              <div className="aspect-square w-full max-w-[min(92vw,560px)] overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+              <div
+                data-board-area=""
+                className="aspect-square w-full max-w-[min(92vw,560px)] overflow-hidden rounded-2xl border border-white/10 bg-black/30"
+              >
                 <Board3D />
               </div>
             ) : (

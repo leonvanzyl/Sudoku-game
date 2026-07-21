@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 function format(elapsedMs: number): string {
   const total = Math.max(0, Math.floor(elapsedMs / 1000));
@@ -21,25 +21,16 @@ export interface TimerProps {
 
 /** Live match timer driven by SharedGameState.startedAt. */
 export default function Timer({ startedAt, running }: TimerProps) {
-  const [elapsed, setElapsed] = useState(0);
-  const frozenRef = useRef(0);
+  // "now" only advances while running, so the display freezes on game over.
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (startedAt === null) {
-      setElapsed(0);
-      frozenRef.current = 0;
-      return;
-    }
-    if (!running) return; // keep last shown value frozen
-    const tick = () => {
-      const e = Date.now() - startedAt;
-      frozenRef.current = e;
-      setElapsed(e);
-    };
-    tick();
-    const id = window.setInterval(tick, 500);
+    if (startedAt === null || !running) return;
+    const id = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(id);
   }, [startedAt, running]);
+
+  const elapsed = startedAt === null ? 0 : Math.max(0, now - startedAt);
 
   return (
     <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-1.5">
@@ -49,7 +40,7 @@ export default function Timer({ startedAt, running }: TimerProps) {
         }`}
       />
       <span className="font-mono text-sm font-semibold tabular-nums tracking-widest text-cyan-100">
-        {format(running ? elapsed : frozenRef.current || elapsed)}
+        {format(elapsed)}
       </span>
     </div>
   );

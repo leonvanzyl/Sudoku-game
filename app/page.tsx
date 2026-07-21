@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -79,6 +79,16 @@ const fadeUp = {
   animate: { opacity: 1, y: 0 },
 };
 
+/** True after hydration; false during SSR + the hydration render. */
+const emptySubscribe = () => () => {};
+function useMounted(): boolean {
+  return useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+}
+
 /* ---------------------------------------------------------------- */
 /* Page                                                              */
 /* ---------------------------------------------------------------- */
@@ -89,24 +99,16 @@ export default function Home() {
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
   const progression = useGameStore((s) => s.progression);
 
-  const [mounted, setMounted] = useState(false);
-  const [name, setName] = useState("");
+  const mounted = useMounted();
+  // null until the user types — falls back to the persisted name post-hydration.
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [mode, setMode] = useState<GameMode>("coop");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [nameError, setNameError] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Pull the persisted name into the input once we're on the client.
-  useEffect(() => {
-    if (mounted && localPlayer?.name) setName((n) => n || localPlayer.name);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted]);
-
+  const name = nameDraft ?? (mounted ? (localPlayer?.name ?? "") : "");
   const trimmedName = name.trim();
 
   const commitName = (): boolean => {
@@ -184,7 +186,7 @@ export default function Home() {
           maxLength={20}
           placeholder="Enter your name…"
           onChange={(e) => {
-            setName(e.target.value);
+            setNameDraft(e.target.value);
             if (e.target.value.trim()) setNameError(false);
           }}
           onBlur={() => {
