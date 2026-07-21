@@ -1,4 +1,4 @@
-import type { Grid } from "@/lib/types";
+import type { Grid } from "../types";
 
 // ---------------------------------------------------------------
 // Unit definitions: 27 units (9 rows, 9 cols, 9 boxes), each an
