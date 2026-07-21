@@ -116,15 +116,16 @@ export const UNLOCK_XP: Record<Difficulty, number> = {
   expert: 700,
 };
 
+// NOTE: deliberately no reds/pinks — those read as "error" on the board.
 export const PLAYER_COLORS = [
   "#22d3ee", // cyan
-  "#f472b6", // pink
+  "#a78bfa", // violet
   "#a3e635", // lime
-  "#fb923c", // orange
-  "#c084fc", // purple
-  "#facc15", // yellow
+  "#fbbf24", // amber
+  "#60a5fa", // blue
   "#34d399", // emerald
-  "#f87171", // red
+  "#fb923c", // orange
+  "#e879f9", // fuchsia
 ] as const;
 
 export const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

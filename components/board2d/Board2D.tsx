@@ -89,6 +89,16 @@ export default function Board2D({ onInput }: Board2DProps) {
     selectedCell !== null ? Math.floor(selRow / 3) * 3 + Math.floor(selCol / 3) : -1;
   const selValue = selectedCell !== null ? visibleGrid[selectedCell] : 0;
 
+  /* Attribution for the selected cell (tooltips don't exist on touch):
+   * who placed this entry, shown in their color under the board. */
+  const selEntry =
+    selectedCell !== null && puzzle[selectedCell] === 0 ? entries?.[selectedCell] : undefined;
+  const selPlacer =
+    selEntry && selEntry.value !== 0 && selEntry.byPlayer
+      ? playerById.get(selEntry.byPlayer)
+      : undefined;
+  const selIsGiven = selectedCell !== null && puzzle[selectedCell] !== 0;
+
   return (
     <div
       data-board-area=""
@@ -138,7 +148,11 @@ export default function Board2D({ onInput }: Board2DProps) {
                 "border-white/[0.07]",
                 col > 0 ? (col % 3 === 0 ? "border-l-2 border-l-cyan-300/25" : "border-l") : "",
                 row > 0 ? (row % 3 === 0 ? "border-t-2 border-t-cyan-300/25" : "border-t") : "",
-                isSelected ? "ring-1 ring-inset ring-cyan-300/80" : "",
+                isSelected
+                  ? "ring-1 ring-inset ring-cyan-300/80"
+                  : isConflict
+                    ? "ring-1 ring-inset ring-red-500/70"
+                    : "",
               ].join(" ")}
             >
               {value !== 0 && (
@@ -169,6 +183,26 @@ export default function Board2D({ onInput }: Board2DProps) {
             </div>
           );
         })}
+      </div>
+      {/* fixed-height caption strip — no layout jump when it toggles */}
+      <div className="flex h-6 items-center justify-center">
+        {selPlacer ? (
+          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/45">
+            <span
+              className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle"
+              style={{ backgroundColor: selPlacer.color, boxShadow: `0 0 6px ${selPlacer.color}` }}
+            />
+            placed by{" "}
+            <span className="font-semibold" style={{ color: selPlacer.color }}>
+              {selPlacer.name}
+            </span>
+            {selEntry?.locked ? " · correct" : ""}
+          </p>
+        ) : selIsGiven ? (
+          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/30">
+            given clue
+          </p>
+        ) : null}
       </div>
     </div>
   );
