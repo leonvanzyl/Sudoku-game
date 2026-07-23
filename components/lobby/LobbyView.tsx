@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import ColorPicker from "@/components/ColorPicker";
 import PetPicker from "@/components/pets/PetPicker";
 import { assignPetSpecies, petName } from "@/lib/pets/catalog";
@@ -67,7 +67,7 @@ export default function LobbyView({
   };
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
@@ -100,7 +100,7 @@ export default function LobbyView({
           <span className="text-white/40 transition group-hover:text-cyan-200">
             <AnimatePresence mode="wait" initial={false}>
               {copied ? (
-                <motion.svg
+                <m.svg
                   key="check"
                   initial={{ scale: 0.5, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -114,9 +114,9 @@ export default function LobbyView({
                   className="h-6 w-6"
                 >
                   <path d="M20 6 9 17l-5-5" />
-                </motion.svg>
+                </m.svg>
               ) : (
-                <motion.svg
+                <m.svg
                   key="copy"
                   initial={{ scale: 0.5, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -129,7 +129,7 @@ export default function LobbyView({
                 >
                   <rect x="9" y="9" width="12" height="12" rx="2" />
                   <path d="M5 15V5a2 2 0 0 1 2-2h10" />
-                </motion.svg>
+                </m.svg>
               )}
             </AnimatePresence>
           </span>
@@ -176,7 +176,7 @@ export default function LobbyView({
         <ul className="mt-3 flex flex-col gap-2">
           <AnimatePresence initial={false}>
             {game.players.map((p) => (
-              <motion.li
+              <m.li
                 key={p.id}
                 layout
                 initial={{ opacity: 0, x: -14 }}
@@ -199,7 +199,7 @@ export default function LobbyView({
                     Host
                   </span>
                 )}
-              </motion.li>
+              </m.li>
             ))}
           </AnimatePresence>
         </ul>
@@ -247,6 +247,6 @@ export default function LobbyView({
           WAITING FOR HOST TO START…
         </p>
       )}
-    </motion.div>
+    </m.div>
   );
 }

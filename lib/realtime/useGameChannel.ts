@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ConnectionStateChange,
   InboundMessage,
+  Realtime,
   RealtimeChannel,
 } from "ably";
 import {
@@ -179,7 +180,8 @@ export function useGameChannel(
       if (!enabled || typeof window === "undefined" || !code) return;
       const lp = useGameStore.getState().localPlayer;
       if (!lp) return;
-      const channel = getAblyClient(lp.id).channels.get(channelName(code));
+      const client = await getAblyClient(lp.id);
+      const channel = client.channels.get(channelName(code));
       await channel.publish(msg.type, msg);
     },
     [code, enabled],
@@ -193,9 +195,8 @@ export function useGameChannel(
       const me = useGameStore.getState().localPlayer;
       if (!me) return;
       try {
-        await getAblyClient(me.id)
-          .channels.get(channelName(code))
-          .presence.update(me);
+        const client = await getAblyClient(me.id);
+        await client.channels.get(channelName(code)).presence.update(me);
       } catch {
         // presence not entered yet / offline — the local update stands and
         // the next presence enter carries the persisted color anyway
@@ -212,9 +213,8 @@ export function useGameChannel(
       const me = useGameStore.getState().localPlayer;
       if (!me) return;
       try {
-        await getAblyClient(me.id)
-          .channels.get(channelName(code))
-          .presence.update(me);
+        const client = await getAblyClient(me.id);
+        await client.channels.get(channelName(code)).presence.update(me);
       } catch {
         // presence not entered yet / offline — the local update stands and
         // the next presence enter carries the persisted pet anyway
@@ -235,9 +235,8 @@ export function useGameChannel(
     const lp = store.localPlayer;
     if (lp && typeof window !== "undefined" && code) {
       try {
-        await getAblyClient(lp.id)
-          .channels.get(channelName(code))
-          .presence.leave();
+        const client = await getAblyClient(lp.id);
+        await client.channels.get(channelName(code)).presence.leave();
       } catch {
         // ignore
       }
@@ -259,16 +258,39 @@ export function useGameChannel(
     }
 
     let disposed = false;
-    const client = getAblyClient(localPlayer.id);
+    // Acquired asynchronously in setup() — the Ably SDK is lazy-loaded so
+    // the game UI paints before (and, in solo mode, without) the SDK.
+    let client: Realtime | null = null;
+    let channel: RealtimeChannel | null = null;
     const chanName = channelName(code);
     channelMounts.set(chanName, (channelMounts.get(chanName) ?? 0) + 1);
-    const channel: RealtimeChannel = client.channels.get(chanName);
 
-    // Keep the per-tab host snapshot current so a page refresh can restore it.
+    // Keep the per-tab host snapshot current so a page refresh can restore
+    // it. Serializing the full game state is not free, so writes only happen
+    // when the snapshot's inputs (game / localBoard) actually changed, and
+    // bursts collapse into one debounced write (flushed on pagehide, which
+    // fires on refresh — the only navigation the snapshot must survive).
     saveHostSnapshot(code);
-    const unsubscribePersist = useGameStore.subscribe(() => {
+    let snapshotTimer: number | null = null;
+    const scheduleSnapshot = () => {
+      if (snapshotTimer !== null) return;
+      snapshotTimer = window.setTimeout(() => {
+        snapshotTimer = null;
+        saveHostSnapshot(code);
+      }, 400);
+    };
+    const flushSnapshot = () => {
+      if (snapshotTimer !== null) {
+        window.clearTimeout(snapshotTimer);
+        snapshotTimer = null;
+      }
       saveHostSnapshot(code);
+    };
+    const unsubscribePersist = useGameStore.subscribe((s, prev) => {
+      if (s.game === prev.game && s.localBoard === prev.localBoard) return;
+      scheduleSnapshot();
     });
+    window.addEventListener("pagehide", flushSnapshot);
 
     const clearWatchdog = () => {
       if (watchdogRef.current !== null) {
@@ -281,7 +303,7 @@ export function useGameChannel(
       if (watchdogRef.current !== null || sessionEndedRef.current) return;
       watchdogRef.current = window.setTimeout(async () => {
         watchdogRef.current = null;
-        if (disposed || sessionEndedRef.current) return;
+        if (disposed || sessionEndedRef.current || !channel) return;
         // Re-check presence: the host may have rejoined within the grace
         // period (e.g. page refresh / transient disconnect).
         let hostPresent = false;
@@ -436,6 +458,7 @@ export function useGameChannel(
      * by join order from PLAYER_COLORS.
      */
     const rebuildPlayers = async () => {
+      if (!channel) return;
       let members;
       try {
         members = await channel.presence.get();
@@ -550,14 +573,18 @@ export function useGameChannel(
     };
 
     const setup = async () => {
+      const c = await getAblyClient(localPlayer.id);
+      // Re-check `disposed` after every await: registering a handler after
+      // this mount's cleanup already ran would leak it forever.
+      if (disposed) return;
+      client = c;
+      channel = c.channels.get(chanName);
       useGameStore
         .getState()
-        .setConnectionStatus(mapConnectionState(client.connection.state));
-      client.connection.on(handleConnection);
+        .setConnectionStatus(mapConnectionState(c.connection.state));
+      c.connection.on(handleConnection);
       // subscribe() implicitly attaches; all of these are idempotent, so a
-      // strict-mode double mount is safe. Re-check `disposed` after every
-      // await: registering a handler after this mount's cleanup already ran
-      // would leak it forever.
+      // strict-mode double mount is safe.
       await channel.subscribe(handleMessage);
       if (disposed) return;
       await channel.presence.subscribe(handlePresence);
@@ -580,15 +607,27 @@ export function useGameChannel(
       disposed = true;
       clearWatchdog();
       unsubscribePersist();
+      window.removeEventListener("pagehide", flushSnapshot);
+      if (snapshotTimer !== null) {
+        window.clearTimeout(snapshotTimer);
+        snapshotTimer = null;
+        // A pending write means the last store change was never persisted.
+        saveHostSnapshot(code);
+      }
       // Leaving via the UI (leaveGame ran, store cleared) means this tab no
       // longer hosts the game — drop the snapshot. On a hard refresh this
       // cleanup never runs, which is exactly when the snapshot must survive.
       if (!useGameStore.getState().game) clearHostSnapshot(code);
-      client.connection.off(handleConnection);
-      channel.unsubscribe(handleMessage);
-      channel.presence.unsubscribe(handlePresence);
       channelMounts.set(chanName, Math.max(0, (channelMounts.get(chanName) ?? 1) - 1));
-      channel.presence
+      // If setup() is still awaiting the SDK, there is nothing to tear down:
+      // its post-await disposed checks prevent any late registration.
+      const c = client;
+      const ch = channel;
+      if (!c || !ch) return;
+      c.connection.off(handleConnection);
+      ch.unsubscribe(handleMessage);
+      ch.presence.unsubscribe(handlePresence);
+      ch.presence
         .leave()
         .catch(() => {})
         .finally(() => {
@@ -596,13 +635,13 @@ export function useGameChannel(
           // tab that left the game stops receiving the room's traffic. A
           // strict-mode remount bumps the count synchronously and skips this.
           if ((channelMounts.get(chanName) ?? 0) > 0) return;
-          channel
+          ch
             .detach()
             .catch(() => {})
             .finally(() => {
               if ((channelMounts.get(chanName) ?? 0) === 0) {
                 try {
-                  client.channels.release(chanName);
+                  c.channels.release(chanName);
                 } catch {
                   // ignore — releasing a non-detached channel can throw
                 }

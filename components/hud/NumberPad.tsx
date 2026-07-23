@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { memo } from "react";
 
 export interface NumberPadProps {
   /** Called with 1-9 for digits, 0 for erase. */
@@ -9,31 +9,33 @@ export interface NumberPadProps {
 }
 
 const btnBase =
-  "btn-ghost aspect-square min-h-11 rounded-xl font-mono text-xl font-bold sm:text-2xl";
+  "btn-ghost tap-scale aspect-square min-h-11 rounded-xl font-mono text-xl font-bold sm:text-2xl";
 
-/** Touch-friendly digit pad: 1-9 plus erase. */
-export default function NumberPad({ onInput, disabled = false }: NumberPadProps) {
+/**
+ * Touch-friendly digit pad: 1-9 plus erase. Press feedback is the pure-CSS
+ * .tap-scale rule; memoized because both props are referentially stable, so
+ * parent re-renders (timer, opponent traffic) skip all ten buttons.
+ */
+const NumberPad = memo(function NumberPad({ onInput, disabled = false }: NumberPadProps) {
   return (
     <div className="grid w-full max-w-md grid-cols-5 gap-2">
       {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => (
-        <motion.button
+        <button
           key={n}
           type="button"
-          whileTap={{ scale: 0.9 }}
           disabled={disabled}
           onClick={() => onInput(n)}
-          className={`${btnBase} text-cyan-100 transition hover:text-white disabled:opacity-30`}
+          className={`${btnBase} text-cyan-100 hover:text-white disabled:opacity-30`}
           aria-label={`Enter ${n}`}
         >
           {n}
-        </motion.button>
+        </button>
       ))}
-      <motion.button
+      <button
         type="button"
-        whileTap={{ scale: 0.9 }}
         disabled={disabled}
         onClick={() => onInput(0)}
-        className={`${btnBase} text-pink-300 transition hover:text-pink-200 disabled:opacity-30`}
+        className={`${btnBase} text-pink-300 hover:text-pink-200 disabled:opacity-30`}
         aria-label="Erase"
         title="Erase (Backspace)"
       >
@@ -50,7 +52,9 @@ export default function NumberPad({ onInput, disabled = false }: NumberPadProps)
           <path d="m12 9 6 6" />
           <path d="m18 9-6 6" />
         </svg>
-      </motion.button>
+      </button>
     </div>
   );
-}
+});
+
+export default NumberPad;

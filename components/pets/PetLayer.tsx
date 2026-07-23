@@ -76,7 +76,9 @@ interface PetState {
   panicRepickAt: number;
 }
 
-function boardRect(): { left: number; top: number; right: number; bottom: number } | null {
+type BoardRect = { left: number; top: number; right: number; bottom: number };
+
+function measureBoardRect(): BoardRect | null {
   const first = document.querySelector('[data-cell-index="0"]');
   const last = document.querySelector('[data-cell-index="80"]');
   if (!first || !last) return null;
@@ -85,6 +87,9 @@ function boardRect(): { left: number; top: number; right: number; bottom: number
   if (a.width === 0 || b.width === 0) return null;
   return { left: a.left, top: a.top, right: b.right, bottom: b.bottom };
 }
+
+/** How long a measured board rect stays fresh without an invalidating event. */
+const BOARD_RECT_TTL_MS = 300;
 
 function cellCenter(index: number): { x: number; y: number } | null {
   const el = document.querySelector(`[data-cell-index="${index}"]`);
@@ -138,8 +143,44 @@ export default function PetLayer() {
     // Pair-interaction cooldowns, keyed "idA|idB" (sorted).
     const cooldowns = new Map<string, number>();
 
+    /* getBoundingClientRect forces a synchronous layout flush, so the board
+     * rect is cached and re-measured only on resize/scroll or after a short
+     * TTL — not on all four gBCR reads every frame. */
+    let cachedRect: BoardRect | null = null;
+    let rectMeasuredAt = -Infinity;
+    const invalidateRect = () => {
+      rectMeasuredAt = -Infinity;
+    };
+    const boardRect = (now: number): BoardRect | null => {
+      if (now - rectMeasuredAt > BOARD_RECT_TTL_MS) {
+        cachedRect = measureBoardRect();
+        rectMeasuredAt = now;
+      }
+      return cachedRect;
+    };
+    window.addEventListener("resize", invalidateRect);
+    window.addEventListener("scroll", invalidateRect, { passive: true, capture: true });
+
+    /* The emote/img children are static per pet — resolve them once per
+     * container node instead of querySelector-ing every pet every frame. */
+    const partsCache = new WeakMap<
+      HTMLDivElement,
+      { img: HTMLImageElement | null; emote: HTMLElement | null }
+    >();
+    const partsOf = (node: HTMLDivElement) => {
+      let parts = partsCache.get(node);
+      if (!parts) {
+        parts = {
+          img: node.querySelector<HTMLImageElement>("[data-pet-img]"),
+          emote: node.querySelector<HTMLElement>("[data-pet-emote]"),
+        };
+        partsCache.set(node, parts);
+      }
+      return parts;
+    };
+
     const spawn = (): PetState => {
-      const r = boardRect();
+      const r = boardRect(performance.now());
       const cx = r ? rand(r.left, r.right) : window.innerWidth / 2;
       const cy = r ? rand(r.top, r.bottom) : window.innerHeight / 2;
       return {
@@ -192,7 +233,7 @@ export default function PetLayer() {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
 
-      const r = boardRect();
+      const r = boardRect(now);
       const metas = petsRef.current;
 
       for (const meta of metas) {
@@ -273,17 +314,17 @@ export default function PetLayer() {
           }
         }
 
+        const { img, emote: bubble } = partsOf(node);
+
         // ---- sprite frame ----
         const frameMs = moving && dist > 3 ? 170 : 430;
         if (now - s.frameAt > frameMs) {
           s.frameAt = now;
           s.frame = s.frame === 0 ? 1 : 0;
-          const img = node.querySelector<HTMLImageElement>("[data-pet-img]");
           if (img) img.src = meta.frameUrls[s.frame];
         }
 
         // ---- emote bubble ----
-        const bubble = node.querySelector<HTMLElement>("[data-pet-emote]");
         if (bubble) {
           const show = s.emote !== null && now < s.emoteUntil;
           bubble.style.opacity = show ? "1" : "0";
@@ -301,7 +342,6 @@ export default function PetLayer() {
         node.style.transform = `translate3d(${s.x - PET_PX / 2}px, ${
           s.y - PET_PX / 2 + bob
         }px, 0)`;
-        const img = node.querySelector<HTMLImageElement>("[data-pet-img]");
         if (img) img.style.transform = `scaleX(${s.facing})`;
       }
 
@@ -338,6 +378,8 @@ export default function PetLayer() {
     return () => {
       cancelAnimationFrame(raf);
       unsubscribe();
+      window.removeEventListener("resize", invalidateRect);
+      window.removeEventListener("scroll", invalidateRect, { capture: true });
     };
     // petsKey covers roster/color changes; `active` gates the whole loop.
   }, [active, petsKey]);

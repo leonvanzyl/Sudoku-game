@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { useGameChannel } from "@/lib/realtime/useGameChannel";
 import { useGameStore } from "@/lib/store/gameStore";
 import type { Difficulty, GameMessage, RaceProgress, SharedGameState } from "@/lib/types";
@@ -28,6 +28,9 @@ const DIFFICULTY_ACCENT: Record<Difficulty, string> = {
 };
 
 const XP_MULT: Record<Difficulty, number> = { easy: 1, medium: 1.5, hard: 2, expert: 3 };
+
+/** Minimum gap between published race-progress messages. */
+const RACE_PROGRESS_THROTTLE_MS = 600;
 
 /** Mirrors the progression rules (win 60 / participation 15, × difficulty). */
 function xpGained(won: boolean, difficulty: Difficulty): number {
@@ -150,7 +153,21 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
     [publish],
   );
 
-  const game = useGameStore((s) => s.game);
+  /* Narrow store subscriptions: the game object is replaced on every
+   * incoming move/progress message, so subscribing to the whole thing would
+   * re-render this entire tree on traffic that changes nothing rendered
+   * here. Each selector below returns a primitive (or a reference the store
+   * keeps stable when content is unchanged). */
+  const hasGame = useGameStore((s) => s.game !== null);
+  const phase = useGameStore((s) => s.game?.phase ?? null);
+  const gameCode = useGameStore((s) => s.game?.code ?? null);
+  const mode = useGameStore((s) => s.game?.mode ?? null);
+  const difficulty = useGameStore((s) => s.game?.difficulty ?? null);
+  const startedAt = useGameStore((s) => s.game?.startedAt ?? null);
+  const winnerId = useGameStore((s) => s.game?.winnerId ?? null);
+  const petsOn = useGameStore((s) => s.game?.petsEnabled ?? true);
+  const eventsOn = useGameStore((s) => s.game?.eventsEnabled ?? true);
+  const players = useGameStore((s) => s.game?.players ?? null);
   const isHost = useGameStore((s) => s.isHost);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
@@ -164,9 +181,46 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
 
   const recordedRef = useRef(false);
 
-  const phase = game?.phase ?? null;
   /** Show the spinner-y start button only while we're still in the lobby. */
   const startPending = starting && phase === "lobby";
+
+  /* ---- race-progress throttle ----
+   * Every keystroke in a race produces a race-progress message; publishing
+   * each one makes every opponent's client re-render per keystroke. The
+   * progress bars spring over ~1s anyway, so a trailing-edge throttle loses
+   * nothing visible. race-finished always goes out immediately. */
+  const progressTimerRef = useRef<number | null>(null);
+  const pendingProgressRef = useRef<GameMessage | null>(null);
+  const lastProgressAtRef = useRef(0);
+
+  const publishRaceProgress = useCallback(
+    (msg: GameMessage) => {
+      pendingProgressRef.current = msg;
+      if (progressTimerRef.current !== null) return;
+      const wait = Math.max(
+        0,
+        RACE_PROGRESS_THROTTLE_MS - (Date.now() - lastProgressAtRef.current),
+      );
+      progressTimerRef.current = window.setTimeout(() => {
+        progressTimerRef.current = null;
+        const pending = pendingProgressRef.current;
+        pendingProgressRef.current = null;
+        if (pending) {
+          lastProgressAtRef.current = Date.now();
+          void publish(pending);
+        }
+      }, wait);
+    },
+    [publish],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current !== null) {
+        window.clearTimeout(progressTimerRef.current);
+      }
+    };
+  }, []);
 
   /* ---- input plumbing: store decides, we publish what it returns ---- */
   const handleInput = useCallback(
@@ -174,9 +228,21 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
       const s = useGameStore.getState();
       if (s.game?.phase !== "playing") return;
       const msg = s.inputNumber(value);
-      if (msg) void publish(msg);
+      if (!msg) return;
+      if (msg.type === "race-progress") {
+        publishRaceProgress(msg);
+        return;
+      }
+      if (msg.type === "race-finished" && progressTimerRef.current !== null) {
+        // Finishing supersedes any queued progress update: the receivers
+        // synthesize the full final progress from race-finished itself.
+        window.clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+        pendingProgressRef.current = null;
+      }
+      void publish(msg);
     },
-    [publish],
+    [publish, publishRaceProgress],
   );
 
   /* ---- host: start the game ---- */
@@ -261,7 +327,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   if (sessionEnded) {
     return (
       <FullScreenNotice>
-        <motion.div
+        <m.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           className="glass-deep w-full max-w-sm rounded-3xl p-8"
@@ -279,7 +345,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
           >
             BACK TO HOME
           </button>
-        </motion.div>
+        </m.div>
       </FullScreenNotice>
     );
   }
@@ -296,7 +362,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   if (!localPlayer) {
     return (
       <FullScreenNotice>
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           className="glass w-full max-w-sm rounded-3xl p-8 text-left"
@@ -326,13 +392,13 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
           >
             ENTER LOBBY
           </button>
-        </motion.div>
+        </m.div>
       </FullScreenNotice>
     );
   }
 
   /* Waiting for the host's state-sync. */
-  if (!game) {
+  if (!hasGame) {
     if (solo) {
       // A refreshed solo tab has no state to restore — send them home.
       return (
@@ -367,7 +433,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
     );
   }
 
-  if (game.phase === "lobby") {
+  if (phase === "lobby") {
     return (
       <>
         <LobbyView
@@ -386,9 +452,11 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   /* Playing / finished                                                */
   /* ================================================================ */
 
-  const accent = DIFFICULTY_ACCENT[game.difficulty];
-  const winner = game.winnerId ? (game.players.find((p) => p.id === game.winnerId) ?? null) : null;
-  const localWon = game.mode === "coop" ? true : game.winnerId === localPlayer.id;
+  if (!gameCode || !mode || !difficulty) return null; // unreachable once a game exists
+
+  const accent = DIFFICULTY_ACCENT[difficulty];
+  const winner = winnerId ? (players?.find((p) => p.id === winnerId) ?? null) : null;
+  const localWon = mode === "coop" ? true : winnerId === localPlayer.id;
 
   const connectionDot = solo ? (
     <span className="rounded-full border border-violet-300/40 bg-violet-300/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-violet-200">
@@ -408,8 +476,6 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   );
 
   /* Host-only switches for the fun extras (pets / random events). */
-  const petsOn = game.petsEnabled ?? true;
-  const eventsOn = game.eventsEnabled ?? true;
   const funToggles = isHost ? (
     <div className="flex overflow-hidden rounded-xl border border-white/10 bg-black/30">
       <button
@@ -462,21 +528,21 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   return (
     <div className="flex min-h-dvh flex-col">
       {/* ---------- top HUD bar ---------- */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-black/40 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <span className="neon-title hidden font-display text-sm font-extrabold tracking-[0.2em] sm:block">
             NEON SUDOKU
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-xs tracking-[0.3em] text-cyan-200">
-            {game.code}
+            {gameCode}
           </span>
           <span
             className="rounded-full border px-3 py-1 font-display text-[10px] font-bold uppercase tracking-widest"
             style={{ color: accent, borderColor: `${accent}55` }}
           >
-            {game.difficulty}
+            {difficulty}
           </span>
-          <Timer startedAt={game.startedAt} running={game.phase === "playing"} />
+          <Timer startedAt={startedAt} running={phase === "playing"} />
           {connectionDot}
           <div className="ml-auto flex items-center gap-2">
             {funToggles}
@@ -488,15 +554,15 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
       {/* ---------- main area ---------- */}
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center gap-6 px-4 py-6 lg:flex-row lg:items-start lg:justify-center">
         <div className="flex w-full flex-col items-center gap-5 lg:flex-1">
-          <motion.div
+          <m.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
             className="flex w-full justify-center"
           >
             <Board2D onInput={handleInput} />
-          </motion.div>
-          <NumberPad onInput={handleInput} disabled={game.phase !== "playing"} />
+          </m.div>
+          <NumberPad onInput={handleInput} disabled={phase !== "playing"} />
         </div>
 
         <aside className="w-full max-w-[min(92vw,560px)] lg:w-80 lg:max-w-none">
@@ -510,13 +576,13 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
       {/* ---------- confirm end session ---------- */}
       <AnimatePresence>
         {confirmEnd && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-6 backdrop-blur-sm"
           >
-            <motion.div
+            <m.div
               initial={{ scale: 0.92, y: 12 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.92, y: 12 }}
@@ -544,37 +610,37 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
                   END FOR ALL
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </m.div>
+          </m.div>
         )}
       </AnimatePresence>
 
       {/* ---------- game over overlay ---------- */}
       <AnimatePresence>
-        {game.phase === "finished" && (
-          <motion.div
+        {phase === "finished" && (
+          <m.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.6 }}
             className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-6 backdrop-blur-[3px]"
           >
-            <motion.div
+            <m.div
               initial={{ scale: 0.85, y: 24, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}
               transition={{ type: "spring", stiffness: 220, damping: 22, delay: 0.7 }}
               className="glass-deep w-full max-w-md rounded-3xl p-8 text-center"
             >
               <p className="font-mono text-[10px] uppercase tracking-[0.45em] text-white/45">
-                {game.mode === "race" ? "race complete" : "board complete"}
+                {mode === "race" ? "race complete" : "board complete"}
               </p>
               <h2
                 className={`mt-2 font-display text-4xl font-extrabold tracking-[0.12em] ${
                   localWon ? "neon-title" : "text-white/70"
                 }`}
               >
-                {game.mode === "coop" ? "TEAM CLEAR" : localWon ? "VICTORY" : "DEFEAT"}
+                {mode === "coop" ? "TEAM CLEAR" : localWon ? "VICTORY" : "DEFEAT"}
               </h2>
-              {game.mode === "race" && (
+              {mode === "race" && (
                 <p className="mt-3 text-sm text-white/70">
                   {winner ? (
                     <>
@@ -594,7 +660,7 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
               <div className="mt-6 flex items-center justify-center gap-3">
                 <div className="rounded-xl bg-white/[0.05] px-5 py-3">
                   <p className="font-display text-2xl font-bold text-cyan-300">
-                    +{xpGained(localWon, game.difficulty)}
+                    +{xpGained(localWon, difficulty)}
                   </p>
                   <p className="mt-0.5 font-mono text-[9px] uppercase tracking-widest text-white/40">
                     XP earned
@@ -629,8 +695,8 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
                   </button>
                 )}
               </div>
-            </motion.div>
-          </motion.div>
+            </m.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
+import { memo, useEffect, useMemo } from "react";
+import { m } from "framer-motion";
 import { getConflicts } from "@/lib/sudoku";
 import { useGameStore } from "@/lib/store/gameStore";
 
@@ -16,18 +16,110 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 }
 
+interface CellProps {
+  index: number;
+  value: number;
+  isGiven: boolean;
+  isSelected: boolean;
+  isPeer: boolean;
+  sameNumber: boolean;
+  isConflict: boolean;
+  placerName: string | null;
+  placerColor: string | null;
+  onSelect: (i: number) => void;
+}
+
+/**
+ * One board cell. Memoized on primitive props so a selection change only
+ * commits the handful of cells whose highlight actually changed, and an
+ * opponent's message that changes nothing visible commits none.
+ */
+const Cell = memo(function Cell({
+  index,
+  value,
+  isGiven,
+  isSelected,
+  isPeer,
+  sameNumber,
+  isConflict,
+  placerName,
+  placerColor,
+  onSelect,
+}: CellProps) {
+  const row = Math.floor(index / 9);
+  const col = index % 9;
+
+  let bg = "bg-transparent";
+  if (isSelected) bg = "bg-cyan-400/25";
+  else if (isConflict) bg = "bg-red-500/20";
+  else if (sameNumber) bg = "bg-violet-400/15";
+  else if (isPeer) bg = "bg-white/[0.05]";
+
+  return (
+    <div
+      data-cell-index={index}
+      role="gridcell"
+      aria-selected={isSelected}
+      title={placerName ? `Placed by ${placerName}` : undefined}
+      onPointerDown={() => onSelect(index)}
+      className={[
+        "relative flex cursor-pointer items-center justify-center",
+        bg,
+        "border-white/[0.07]",
+        col > 0 ? (col % 3 === 0 ? "border-l-2 border-l-cyan-300/25" : "border-l") : "",
+        row > 0 ? (row % 3 === 0 ? "border-t-2 border-t-cyan-300/25" : "border-t") : "",
+        isSelected
+          ? "ring-1 ring-inset ring-cyan-300/80"
+          : isConflict
+            ? "ring-1 ring-inset ring-red-500/70"
+            : "",
+      ].join(" ")}
+    >
+      {value !== 0 && (
+        <m.span
+          key={`${index}:${value}:${placerColor ?? "given"}`}
+          initial={isGiven ? false : { scale: 0.3, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 500, damping: 24 }}
+          className={[
+            "font-mono text-base font-bold tabular-nums sm:text-2xl",
+            isGiven ? "text-white" : "font-semibold",
+            isConflict && !isGiven ? "!text-red-400" : "",
+          ].join(" ")}
+          style={
+            !isGiven
+              ? {
+                  color: isConflict ? undefined : (placerColor ?? "#7dd3fc"),
+                  textShadow: placerColor
+                    ? `0 0 12px ${placerColor}66`
+                    : "0 0 12px rgba(125,211,252,0.35)",
+                }
+              : { textShadow: "0 0 6px rgba(255,255,255,0.25)" }
+          }
+        >
+          {value}
+        </m.span>
+      )}
+    </div>
+  );
+});
+
 /**
  * The 2D sudoku board. Renders the co-op board in co-op mode and the local
  * board in race mode. Every cell carries `data-cell-index` for the FX layer.
+ * Subscribes to narrow store slices so race-progress churn from opponents
+ * (which never changes anything visible here) doesn't re-render the grid.
  */
 export default function Board2D({ onInput }: Board2DProps) {
-  const game = useGameStore((s) => s.game);
+  const mode = useGameStore((s) => s.game?.mode ?? null);
+  const puzzle = useGameStore((s) => s.game?.puzzle ?? null);
+  const coopBoard = useGameStore((s) => s.game?.coopBoard ?? null);
+  const players = useGameStore((s) => s.game?.players ?? null);
   const localBoard = useGameStore((s) => s.localBoard);
   const selectedCell = useGameStore((s) => s.selectedCell);
   const selectCell = useGameStore((s) => s.selectCell);
 
-  const puzzle = game?.puzzle;
-  const entries = game?.mode === "race" ? localBoard : game?.coopBoard;
+  const entries = mode === "race" ? localBoard : coopBoard;
 
   /** What each cell currently shows. */
   const visibleGrid = useMemo(() => {
@@ -43,9 +135,9 @@ export default function Board2D({ onInput }: Board2DProps) {
 
   const playerById = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
-    for (const p of game?.players ?? []) map.set(p.id, { name: p.name, color: p.color });
+    for (const p of players ?? []) map.set(p.id, { name: p.name, color: p.color });
     return map;
-  }, [game?.players]);
+  }, [players]);
 
   // Keyboard: 1-9 input, 0/backspace/delete erase, arrows move selection.
   useEffect(() => {
@@ -81,7 +173,7 @@ export default function Board2D({ onInput }: Board2DProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [onInput, selectCell]);
 
-  if (!game || !puzzle) return null;
+  if (!mode || !puzzle) return null;
 
   const selRow = selectedCell !== null ? Math.floor(selectedCell / 9) : -1;
   const selCol = selectedCell !== null ? selectedCell % 9 : -1;
@@ -124,63 +216,22 @@ export default function Board2D({ onInput }: Board2DProps) {
             selectedCell !== null &&
             !isSelected &&
             (row === selRow || col === selCol || box === selBox);
-          const sameNumber =
-            !isSelected && selValue !== 0 && value === selValue;
-          const isConflict = conflicts.has(i);
-
-          let bg = "bg-transparent";
-          if (isSelected) bg = "bg-cyan-400/25";
-          else if (isConflict) bg = "bg-red-500/20";
-          else if (sameNumber) bg = "bg-violet-400/15";
-          else if (isPeer) bg = "bg-white/[0.05]";
+          const sameNumber = !isSelected && selValue !== 0 && value === selValue;
 
           return (
-            <div
+            <Cell
               key={i}
-              data-cell-index={i}
-              role="gridcell"
-              aria-selected={isSelected}
-              title={placer ? `Placed by ${placer.name}` : undefined}
-              onPointerDown={() => selectCell(i)}
-              className={[
-                "relative flex cursor-pointer items-center justify-center transition-colors duration-100",
-                bg,
-                "border-white/[0.07]",
-                col > 0 ? (col % 3 === 0 ? "border-l-2 border-l-cyan-300/25" : "border-l") : "",
-                row > 0 ? (row % 3 === 0 ? "border-t-2 border-t-cyan-300/25" : "border-t") : "",
-                isSelected
-                  ? "ring-1 ring-inset ring-cyan-300/80"
-                  : isConflict
-                    ? "ring-1 ring-inset ring-red-500/70"
-                    : "",
-              ].join(" ")}
-            >
-              {value !== 0 && (
-                <motion.span
-                  key={`${i}:${value}:${placer?.color ?? "given"}`}
-                  initial={isGiven ? false : { scale: 0.3, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 24 }}
-                  className={[
-                    "font-mono text-base font-bold tabular-nums sm:text-2xl",
-                    isGiven ? "text-white" : "font-semibold",
-                    isConflict && !isGiven ? "!text-red-400" : "",
-                  ].join(" ")}
-                  style={
-                    !isGiven
-                      ? {
-                          color: isConflict ? undefined : (placer?.color ?? "#7dd3fc"),
-                          textShadow: placer
-                            ? `0 0 12px ${placer.color}66`
-                            : "0 0 12px rgba(125,211,252,0.35)",
-                        }
-                      : { textShadow: "0 0 6px rgba(255,255,255,0.25)" }
-                  }
-                >
-                  {value}
-                </motion.span>
-              )}
-            </div>
+              index={i}
+              value={value}
+              isGiven={isGiven}
+              isSelected={isSelected}
+              isPeer={isPeer}
+              sameNumber={sameNumber}
+              isConflict={conflicts.has(i)}
+              placerName={placer?.name ?? null}
+              placerColor={placer?.color ?? null}
+              onSelect={selectCell}
+            />
           );
         })}
       </div>

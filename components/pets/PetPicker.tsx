@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { PET_SPECIES, renderPetFrame } from "@/lib/pets/catalog";
 
 export interface PetPickerProps {
@@ -28,15 +27,14 @@ export default function PetPicker({
         const isSelected = value === sp.id;
         const isTaken = !isSelected && (taken?.has(sp.id) ?? false);
         return (
-          <motion.button
+          <button
             key={sp.id}
             type="button"
-            whileTap={isTaken ? undefined : { scale: 0.85 }}
             disabled={isTaken}
             onClick={() => onChange(sp.id)}
             aria-label={`Pick pet: ${sp.label}`}
             title={isTaken ? "Taken by another player" : sp.label}
-            className="relative flex h-10 w-10 items-center justify-center rounded-xl border transition disabled:cursor-not-allowed"
+            className="tap-scale relative flex h-10 w-10 items-center justify-center rounded-xl border disabled:cursor-not-allowed"
             style={{
               backgroundColor: isSelected ? `${accent}1e` : "rgba(0,0,0,0.3)",
               borderColor: isSelected ? accent : "rgba(255,255,255,0.1)",
@@ -60,7 +58,7 @@ export default function PetPicker({
                 ✕
               </span>
             )}
-          </motion.button>
+          </button>
         );
       })}
     </div>

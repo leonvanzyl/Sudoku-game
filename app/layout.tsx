@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Orbitron, Space_Grotesk } from "next/font/google";
+import MotionProvider from "@/components/MotionProvider";
 import "./globals.css";
 
 const orbitron = Orbitron({
@@ -47,7 +48,9 @@ export default function RootLayout({
           <div className="aurora aurora-c" />
           <div className="bg-vignette" />
         </div>
-        <div className="relative z-10 flex min-h-dvh flex-col">{children}</div>
+        <div className="relative z-10 flex min-h-dvh flex-col">
+          <MotionProvider>{children}</MotionProvider>
+        </div>
       </body>
     </html>
   );

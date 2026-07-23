@@ -13,7 +13,7 @@
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { fxBus } from "@/lib/fx/bus";
 import { PLAYER_COLORS, type DisasterKind, type FxEvent } from "@/lib/types";
 import { FxEngine, GOLD_COLORS } from "./particles";
@@ -331,18 +331,26 @@ export default function FxLayer() {
         }}
       />
 
-      {/* Desaturating dim (defeat) */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "rgba(10, 10, 18, 0.45)",
-          backdropFilter: "saturate(0.35) brightness(0.85)",
-          WebkitBackdropFilter: "saturate(0.35) brightness(0.85)",
-          opacity: dim ? 1 : 0,
-          transition: "opacity 500ms ease",
-        }}
-      />
+      {/* Desaturating dim (defeat) — mounted only while active: an
+       * always-present backdrop-filter layer pays its full-screen backdrop
+       * pass every frame even at opacity 0. */}
+      <AnimatePresence>
+        {dim && (
+          <m.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(10, 10, 18, 0.45)",
+              backdropFilter: "saturate(0.35) brightness(0.85)",
+              WebkitBackdropFilter: "saturate(0.35) brightness(0.85)",
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Particle canvas */}
       <canvas
@@ -363,7 +371,7 @@ export default function FxLayer() {
       >
         <AnimatePresence>
           {disaster && (
-            <motion.div
+            <m.div
               key={disaster}
               initial={{ opacity: 0, y: -18, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -396,7 +404,7 @@ export default function FxLayer() {
               >
                 {DISASTER_META[disaster].label}
               </span>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </div>
@@ -413,7 +421,7 @@ export default function FxLayer() {
       >
         <AnimatePresence>
           {banner?.kind === "victory" && (
-            <motion.div
+            <m.div
               key="victory-banner"
               initial={{ opacity: 0, scale: 0.6, y: 24 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -431,7 +439,7 @@ export default function FxLayer() {
                 WebkitBackdropFilter: "blur(8px)",
               }}
             >
-              <motion.div
+              <m.div
                 animate={{ scale: [1, 1.06, 1] }}
                 transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
                 style={{
@@ -445,7 +453,7 @@ export default function FxLayer() {
                 }}
               >
                 {banner.winnerName ? `${banner.winnerName} wins!` : "Victory!"}
-              </motion.div>
+              </m.div>
               <div
                 style={{
                   marginTop: "0.5rem",
@@ -455,11 +463,11 @@ export default function FxLayer() {
               >
                 Puzzle complete
               </div>
-            </motion.div>
+            </m.div>
           )}
 
           {banner?.kind === "defeat" && (
-            <motion.div
+            <m.div
               key="defeat-banner"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -494,7 +502,7 @@ export default function FxLayer() {
               >
                 Better luck next round
               </div>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </div>

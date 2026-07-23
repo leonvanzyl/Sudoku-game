@@ -5,7 +5,7 @@
 // explains the rule; below it, quick notes on controls and the two modes.
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 
 /** A tiny (valid) sample grid — 0 = empty, shown as blanks. */
 // prettier-ignore
@@ -115,14 +115,14 @@ export default function HowToPlay({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm"
       onClick={onClose}
     >
-      <motion.div
+      <m.div
         initial={{ scale: 0.92, y: 16 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.92, y: 16 }}
@@ -156,7 +156,7 @@ export default function HowToPlay({ onClose }: { onClose: () => void }) {
         {/* step caption */}
         <div className="mt-4 min-h-[72px] text-center">
           <AnimatePresence mode="wait">
-            <motion.div
+            <m.div
               key={step.key}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -172,7 +172,7 @@ export default function HowToPlay({ onClose }: { onClose: () => void }) {
               <p className="mx-auto mt-1.5 max-w-sm text-sm leading-relaxed text-white/65">
                 {step.text}
               </p>
-            </motion.div>
+            </m.div>
           </AnimatePresence>
         </div>
 
@@ -224,7 +224,7 @@ export default function HowToPlay({ onClose }: { onClose: () => void }) {
         >
           GOT IT — LET&apos;S PLAY
         </button>
-      </motion.div>
-    </motion.div>
+      </m.div>
+    </m.div>
   );
 }

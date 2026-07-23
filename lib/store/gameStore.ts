@@ -52,6 +52,41 @@ function newlyCompletedUnits(before: Grid, after: Grid, solution: Grid): number[
   return getCompletedUnits(after, solution).filter((u) => !prev.has(u.join(",")));
 }
 
+// Content-equality helpers used to keep existing object references when a
+// host rebroadcast carries no actual change — an echo state-sync then leaves
+// subscribers' selector results identical and React skips the re-render.
+
+function sameCell(a: CellEntry, b: CellEntry): boolean {
+  return a.value === b.value && a.byPlayer === b.byPlayer && a.locked === b.locked;
+}
+
+function sameProgress(a: RaceProgress, b: RaceProgress): boolean {
+  return (
+    a.playerId === b.playerId &&
+    a.correctCount === b.correctCount &&
+    a.mistakes === b.mistakes &&
+    a.finishedAtMs === b.finishedAtMs
+  );
+}
+
+function samePlayers(a: PlayerInfo[], b: PlayerInfo[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.name !== y.name ||
+      x.color !== y.color ||
+      x.isHost !== y.isHost ||
+      x.petId !== y.petId
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function upsertProgress(list: RaceProgress[], p: RaceProgress): RaceProgress[] {
   const idx = list.findIndex((e) => e.playerId === p.playerId);
   if (idx === -1) return [...list, p];
@@ -79,11 +114,18 @@ function mergeRaceProgress(
     if (localPlayerId !== null && inc.playerId === localPlayerId) return cur;
     if (cur.finishedAtMs !== null && inc.finishedAtMs === null) return cur;
     if (inc.finishedAtMs === null && cur.correctCount > inc.correctCount) return cur;
-    return inc;
+    return sameProgress(cur, inc) ? cur : inc;
   });
   const incomingIds = new Set(incoming.map((p) => p.playerId));
   for (const cur of current) {
     if (!incomingIds.has(cur.playerId)) merged.push(cur);
+  }
+  // No entry changed (an echo snapshot): keep the current array reference.
+  if (
+    merged.length === current.length &&
+    merged.every((p, i) => p === current[i])
+  ) {
+    return current;
   }
   return merged;
 }
@@ -98,12 +140,20 @@ function mergeRaceProgress(
  */
 function mergeCoopBoard(current: CellEntry[], incoming: CellEntry[]): CellEntry[] {
   if (current.length !== incoming.length) return incoming;
-  return incoming.map((inc, i) => {
+  let changed = false;
+  const merged = incoming.map((inc, i) => {
     const cur = current[i];
-    if (inc.locked) return inc; // solution-correct — safe to adopt
-    if (cur.locked || cur.value !== inc.value) return cur;
-    return inc;
+    let out: CellEntry;
+    if (inc.locked) out = inc; // solution-correct — safe to adopt
+    else if (cur.locked || cur.value !== inc.value) out = cur;
+    else out = inc;
+    // Adopting an entry with identical content: keep the current reference.
+    if (out === inc && sameCell(cur, inc)) out = cur;
+    if (out !== cur) changed = true;
+    return out;
   });
+  // No cell changed (an echo snapshot): keep the current array reference.
+  return changed ? merged : current;
 }
 
 /**
@@ -252,10 +302,18 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       : null;
     // Mid-game rebroadcasts are merged, not applied wholesale: the snapshot
     // may predate moves/progress already applied locally in delivery order.
+    // Sub-objects keep their current references when content is unchanged
+    // (puzzle/solution never change mid-game), so components subscribed to
+    // them skip re-rendering on echo snapshots.
     const next: SharedGameState = isNewGame
       ? state
       : {
           ...state,
+          puzzle: game.puzzle,
+          solution: game.solution,
+          players: samePlayers(game.players, state.players)
+            ? game.players
+            : state.players,
           coopBoard:
             state.mode === "coop"
               ? mergeCoopBoard(game.coopBoard, state.coopBoard)
@@ -269,11 +327,26 @@ export const useGameStore = create<GameStore>()((set, get) => ({
                 )
               : state.raceProgress,
         };
+    // A snapshot that changes nothing keeps the whole game object identity.
+    const unchanged =
+      !isNewGame &&
+      next.players === game.players &&
+      next.coopBoard === game.coopBoard &&
+      next.raceProgress === game.raceProgress &&
+      next.phase === game.phase &&
+      next.startedAt === game.startedAt &&
+      next.winnerId === game.winnerId &&
+      next.petsEnabled === game.petsEnabled &&
+      next.eventsEnabled === game.eventsEnabled;
+    const localChanged =
+      me && localPlayer
+        ? me.color !== localPlayer.color || me.isHost !== localPlayer.isHost
+        : false;
     set({
-      game: next,
+      game: unchanged ? game : next,
       isHost: me ? me.isHost : isHost,
       localPlayer:
-        me && localPlayer
+        me && localPlayer && localChanged
           ? { ...localPlayer, color: me.color, isHost: me.isHost }
           : localPlayer,
       // Race boards are local-only: initialize on entering a game, but never
@@ -289,14 +362,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const me = localPlayer
       ? players.find((p) => p.id === localPlayer.id) ?? null
       : null;
+    // Presence churn often re-resolves to an identical roster — keep the
+    // existing references so nothing re-renders.
+    const rosterChanged = !game || !samePlayers(game.players, players);
+    const localChanged =
+      me && localPlayer
+        ? me.color !== localPlayer.color || me.isHost !== localPlayer.isHost
+        : false;
     set({
-      ...(game ? { game: { ...game, players } } : {}),
-      ...(me && localPlayer
-        ? {
-            localPlayer: { ...localPlayer, color: me.color, isHost: me.isHost },
-            isHost: me.isHost,
-          }
+      ...(game && rosterChanged ? { game: { ...game, players } } : {}),
+      ...(me && localPlayer && localChanged
+        ? { localPlayer: { ...localPlayer, color: me.color, isHost: me.isHost } }
         : {}),
+      ...(me ? { isHost: me.isHost } : {}),
     });
   },
 

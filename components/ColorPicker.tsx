@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { PLAYER_COLORS } from "@/lib/types";
 
 export interface ColorPickerProps {
@@ -19,15 +18,14 @@ export default function ColorPicker({ value, onChange, taken, className }: Color
         const isSelected = value === c;
         const isTaken = !isSelected && (taken?.has(c) ?? false);
         return (
-          <motion.button
+          <button
             key={c}
             type="button"
-            whileTap={isTaken ? undefined : { scale: 0.85 }}
             disabled={isTaken}
             onClick={() => onChange(c)}
             aria-label={`Pick color ${c}`}
             title={isTaken ? "Taken by another player" : undefined}
-            className="relative flex h-8 w-8 items-center justify-center rounded-full transition disabled:cursor-not-allowed"
+            className="tap-scale relative flex h-8 w-8 items-center justify-center rounded-full disabled:cursor-not-allowed"
             style={{
               backgroundColor: `${c}22`,
               boxShadow: isSelected ? `0 0 14px ${c}aa, inset 0 0 0 2px ${c}` : undefined,
@@ -43,7 +41,7 @@ export default function ColorPicker({ value, onChange, taken, className }: Color
                 ✕
               </span>
             )}
-          </motion.button>
+          </button>
         );
       })}
     </div>

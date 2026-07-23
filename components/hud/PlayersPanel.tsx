@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { useGameStore } from "@/lib/store/gameStore";
 import type { RaceProgress } from "@/lib/types";
 
@@ -66,14 +66,18 @@ export default function PlayersPanel() {
               </div>
               {game.mode === "race" && (
                 <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
-                  <motion.div
-                    className="h-full rounded-full"
+                  {/* Full-width bar scaled on X: transform springs run on
+                    * the compositor, while animating `width` forced a
+                    * layout recalculation on every frame of every bar. */}
+                  <m.div
+                    className="h-full w-full rounded-full"
                     style={{
                       backgroundColor: p.color,
                       boxShadow: `0 0 10px ${p.color}`,
+                      transformOrigin: "left",
                     }}
                     initial={false}
-                    animate={{ width: `${rp?.finishedAtMs != null ? 100 : pct}%` }}
+                    animate={{ scaleX: (rp?.finishedAtMs != null ? 100 : pct) / 100 }}
                     transition={{ type: "spring", stiffness: 120, damping: 20 }}
                   />
                 </div>

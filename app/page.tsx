@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import ColorPicker from "@/components/ColorPicker";
 import HowToPlay from "@/components/HowToPlay";
 import { loadPreferredColor } from "@/lib/store/localPlayer";
@@ -171,7 +171,7 @@ export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center px-4 pb-16 pt-14 sm:px-6 md:pt-20">
       {/* -------- Hero -------- */}
-      <motion.div
+      <m.div
         {...fadeUp}
         transition={{ duration: 0.6, ease: "easeOut" }}
         className="text-center"
@@ -194,10 +194,10 @@ export default function Home() {
         >
           ？ HOW TO PLAY
         </button>
-      </motion.div>
+      </m.div>
 
       {/* -------- Name -------- */}
-      <motion.div
+      <m.div
         {...fadeUp}
         transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" }}
         className="glass mt-10 w-full max-w-xl rounded-2xl p-5"
@@ -238,12 +238,12 @@ export default function Home() {
             setLocalPlayerColor(c);
           }}
         />
-      </motion.div>
+      </m.div>
 
       {/* -------- Panels -------- */}
       <div className="mt-8 grid w-full gap-6 lg:grid-cols-[1.6fr_1fr]">
         {/* Create */}
-        <motion.section
+        <m.section
           {...fadeUp}
           transition={{ duration: 0.6, delay: 0.18, ease: "easeOut" }}
           className="glass rounded-3xl p-6 sm:p-8"
@@ -355,11 +355,11 @@ export default function Home() {
           >
             PRACTICE SOLO — NO FRIENDS NEEDED
           </button>
-        </motion.section>
+        </m.section>
 
         {/* Right column: join + profile */}
         <div className="flex flex-col gap-6">
-          <motion.section
+          <m.section
             {...fadeUp}
             transition={{ duration: 0.6, delay: 0.26, ease: "easeOut" }}
             className="glass rounded-3xl p-6 sm:p-8"
@@ -388,9 +388,9 @@ export default function Home() {
             >
               {busy === "join" ? "JOINING…" : "JOIN"}
             </button>
-          </motion.section>
+          </m.section>
 
-          <motion.section
+          <m.section
             {...fadeUp}
             transition={{ duration: 0.6, delay: 0.34, ease: "easeOut" }}
             className="glass rounded-3xl p-6 sm:p-8"
@@ -443,18 +443,18 @@ export default function Home() {
                 <p className="mt-2 text-xs text-white/35">No clears yet — go set one.</p>
               )}
             </div>
-          </motion.section>
+          </m.section>
         </div>
       </div>
 
-      <motion.p
+      <m.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.8, duration: 1 }}
         className="mt-12 font-mono text-[10px] uppercase tracking-[0.4em] text-white/25"
       >
         host is authority · no accounts · session dies with the host
-      </motion.p>
+      </m.p>
 
       <AnimatePresence>
         {showHowTo && <HowToPlay onClose={() => setShowHowTo(false)} />}

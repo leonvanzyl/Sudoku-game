@@ -21,7 +21,7 @@ interface Particle {
   shape: Shape;
   gravity: number;
   drag: number;
-  /** shadowBlur px; 0 = no glow (cheaper). */
+  /** Glow halo strength; 0 = no glow (drawn as a plain fill). */
   glow: number;
   /** Phase offset for confetti flutter. */
   phase: number;
@@ -41,6 +41,60 @@ export const GOLD_COLORS = [
   "#fbbf24",
   "#fff7d1",
 ] as const;
+
+/* ------------------------------------------------------------------ */
+/* Pre-rendered glow sprites                                           */
+/*                                                                     */
+/* Canvas shadowBlur is one of the slowest 2D operations: every fill   */
+/* renders to an intermediate surface, Gaussian-blurs it, and          */
+/* composites back. A gold burst used to pay that 110+ times per       */
+/* frame. Instead, the glowing shape is rendered ONCE per (shape,      */
+/* color) to a small offscreen canvas — paying the blur a single time  */
+/* — and every particle becomes one cheap drawImage.                   */
+/* ------------------------------------------------------------------ */
+
+/** Shape radius inside the sprite, in sprite px. */
+const SPRITE_R = 16;
+/** Glow halo margin around the shape, in sprite px. */
+const SPRITE_PAD = 14;
+const SPRITE_SIZE = (SPRITE_R + SPRITE_PAD) * 2;
+
+const spriteCache = new Map<string, HTMLCanvasElement>();
+
+function glowSprite(shape: "dot" | "spark", color: string): HTMLCanvasElement {
+  const key = `${shape}:${color}`;
+  const cached = spriteCache.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = SPRITE_SIZE;
+  canvas.height = SPRITE_SIZE;
+  const g = canvas.getContext("2d")!;
+  g.translate(SPRITE_SIZE / 2, SPRITE_SIZE / 2);
+  g.fillStyle = color;
+  g.shadowColor = color;
+
+  const paint = () => {
+    if (shape === "dot") {
+      g.beginPath();
+      g.arc(0, 0, SPRITE_R, 0, TWO_PI);
+      g.fill();
+    } else {
+      // 4-point star: two thin crossing bars.
+      const s = SPRITE_R;
+      const t = Math.max(1, s * 0.28);
+      g.fillRect(-s, -t / 2, s * 2, t);
+      g.fillRect(-t / 2, -s, t, s * 2);
+    }
+  };
+  g.shadowBlur = SPRITE_PAD; // the one-time blur cost
+  paint();
+  g.shadowBlur = 0;
+  paint(); // second pass keeps the core crisp over the halo
+
+  spriteCache.set(key, canvas);
+  return canvas;
+}
 
 export class FxEngine {
   private ps: Particle[] = [];
@@ -267,28 +321,34 @@ export class FxEngine {
       const alpha = Math.min(1, p.life / (p.maxLife * 0.4));
       ctx.globalAlpha = alpha;
       ctx.fillStyle = p.color;
-      if (p.glow > 0) {
-        ctx.shadowBlur = p.glow;
-        ctx.shadowColor = p.color;
-      } else {
-        ctx.shadowBlur = 0;
-      }
 
       switch (p.shape) {
         case "dot":
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, TWO_PI);
-          ctx.fill();
+          if (p.glow > 0) {
+            // drawImage of the pre-blurred sprite, scaled so the shape core
+            // matches p.size (the halo scales proportionally with it).
+            const d = (p.size / SPRITE_R) * (SPRITE_SIZE / 2);
+            ctx.drawImage(glowSprite("dot", p.color), p.x - d, p.y - d, d * 2, d * 2);
+          } else {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, TWO_PI);
+            ctx.fill();
+          }
           break;
         case "spark": {
-          // 4-point star: two thin crossing bars.
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rot);
-          const s = p.size;
-          const t = Math.max(1, s * 0.28);
-          ctx.fillRect(-s, -t / 2, s * 2, t);
-          ctx.fillRect(-t / 2, -s, t, s * 2);
+          if (p.glow > 0) {
+            const d = (p.size / SPRITE_R) * (SPRITE_SIZE / 2);
+            ctx.drawImage(glowSprite("spark", p.color), -d, -d, d * 2, d * 2);
+          } else {
+            // 4-point star: two thin crossing bars.
+            const s = p.size;
+            const t = Math.max(1, s * 0.28);
+            ctx.fillRect(-s, -t / 2, s * 2, t);
+            ctx.fillRect(-t / 2, -s, t, s * 2);
+          }
           ctx.restore();
           break;
         }
@@ -316,6 +376,5 @@ export class FxEngine {
       }
     }
     ctx.globalAlpha = 1;
-    ctx.shadowBlur = 0;
   }
 }
