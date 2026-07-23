@@ -7,7 +7,11 @@ export type Difficulty = "easy" | "medium" | "hard" | "expert";
 export type GameMode = "coop" | "race";
 export type GamePhase = "lobby" | "playing" | "finished";
 
-/** Cosmetic random events broadcast by the host mid-game. */
+/**
+ * Natural disasters — the penalty for a wrong placement. A wrong number has
+ * a small chance of triggering one; it wipes 1-3 correct entries from the
+ * board (the offender's own board in race, the shared board in co-op).
+ */
 export type DisasterKind =
   | "earthquake"
   | "meteor-shower"
@@ -22,6 +26,15 @@ export const DISASTER_KINDS: DisasterKind[] = [
   "tornado",
   "lightning",
 ];
+
+/** How many correct entries each disaster wipes (capped by what's on the board). */
+export const DISASTER_WIPE_COUNT: Record<DisasterKind, number> = {
+  lightning: 1,
+  blizzard: 1,
+  tornado: 2,
+  "meteor-shower": 2,
+  earthquake: 3,
+};
 
 /** 81-length array, row-major. 0 = empty, 1-9 = value. */
 export type Grid = number[];
@@ -72,7 +85,7 @@ export interface SharedGameState {
   winnerId: string | null;
   /** Host-toggleable: pixel pets that wander the board and help out. */
   petsEnabled: boolean;
-  /** Host-toggleable: random cosmetic disaster events. */
+  /** Host-toggleable: disaster events that punish wrong placements. */
   eventsEnabled: boolean;
 }
 
@@ -97,14 +110,25 @@ export type GameMessage =
   | { type: "race-finished"; playerId: string; elapsedMs: number }
   | { type: "game-over"; winnerId: string | null; reason: "completed" | "race-won" }
   | {
-      // co-op: host-published — a player's pet fills one empty cell with the
-      // correct value (value always equals solution[cellIndex]).
+      // co-op: published by the owner's client when their pet pitches in
+      // (small chance after one of their own correct placements) — the pet
+      // fills one empty cell with the correct value (value always equals
+      // solution[cellIndex]). Applied by ALL clients in delivery order.
       type: "pet-help";
       playerId: string; // the pet's owner; the entry is attributed to them
       cellIndex: number;
       value: number;
     }
-  | { type: "disaster"; kind: DisasterKind } // host-published cosmetic event
+  | {
+      // Published by the client whose wrong placement triggered it.
+      // Co-op: ALL clients (incl. sender) wipe cellIndexes from the shared
+      // board in delivery order. Race: the sender has already wiped its own
+      // localBoard; other clients only show the event (toast), no wipe.
+      type: "disaster";
+      kind: DisasterKind;
+      playerId: string; // whose mistake caused it
+      cellIndexes: number[]; // the wiped cells
+    }
   | {
       // host-published when toggling the fun extras mid-game
       type: "fun-settings";
@@ -123,7 +147,18 @@ export type FxEvent =
   | { type: "victory"; winnerName: string | null } // game over celebration
   | { type: "defeat" } // lost the race
   | { type: "pet-help"; cellIndex: number; ownerId: string; color: string } // a pet filled a cell
-  | { type: "disaster"; kind: DisasterKind }; // random event visuals
+  | {
+      // A disaster struck. `intense` = this client's board was hit (full
+      // visuals + per-cell wipe effects); false = another racer's board took
+      // the damage, show the toast only. `cells` are the wiped indexes
+      // (empty when nothing was lost); `byName` is who triggered it, null
+      // when it was the local player.
+      type: "disaster";
+      kind: DisasterKind;
+      cells: number[];
+      intense: boolean;
+      byName: string | null;
+    };
 
 export type FxListener = (e: FxEvent) => void;
 
@@ -220,14 +255,29 @@ export interface GameStore {
   applyMove: (playerId: string, cellIndex: number, value: number) => void;
   /** Race: apply another player's progress update. */
   applyRaceProgress: (p: RaceProgress) => void;
-  /** Co-op: apply a host-published pet-help (ALL clients, incl. host). */
+  /** Co-op: apply a published pet-help (ALL clients, incl. sender). */
   applyPetHelp: (playerId: string, cellIndex: number, value: number) => void;
   /**
-   * Race: the local player's pet fills one random empty cell with the
-   * correct value. Returns the race-progress message to publish, or null
-   * (not in a race, board nearly done — pets never steal the endgame).
+   * The local player's pet fills one random empty cell with the correct
+   * value (never one of the last 3 — pets don't steal the endgame).
+   * Co-op: nothing is applied locally; returns the pet-help message to
+   * publish (all clients apply it in delivery order).
+   * Race: applies to localBoard immediately; returns the race-progress
+   * message to publish. Null when no help is possible.
    */
   petAssistLocal: () => GameMessage | null;
+  /**
+   * A disaster strikes because of the local player's wrong placement.
+   * Picks up to DISASTER_WIPE_COUNT[kind] locked (correct) entries to wipe.
+   * Co-op: nothing is applied locally; returns [disaster] to publish (all
+   * clients wipe in delivery order via applyDisaster).
+   * Race: wipes localBoard immediately + emits fx; returns
+   * [disaster, race-progress] to publish.
+   * Empty array when there is nothing to wipe (no disaster happens).
+   */
+  disasterLocal: (kind: DisasterKind) => GameMessage[];
+  /** Co-op: apply a published disaster — wipe cells (ALL clients, incl. sender). */
+  applyDisaster: (playerId: string, kind: DisasterKind, cellIndexes: number[]) => void;
   /** Apply the host's fun-settings toggle (pets / random events). */
   applyFunSettings: (petsEnabled: boolean, eventsEnabled: boolean) => void;
   /** Mark game over (any mode). */

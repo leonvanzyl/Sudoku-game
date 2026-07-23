@@ -14,7 +14,6 @@ import PlayersPanel from "@/components/hud/PlayersPanel";
 import FxLayer from "@/components/fx/FxLayer";
 import PetLayer from "@/components/pets/PetLayer";
 import { useFunDirector } from "@/lib/pets/useFunDirector";
-import { fxBus } from "@/lib/fx/bus";
 
 /* ---------------------------------------------------------------- */
 /* helpers                                                           */
@@ -116,7 +115,10 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
         checkCoopComplete();
         break;
       case "disaster":
-        fxBus.emit({ type: "disaster", kind: msg.kind });
+        // Race: disasterLocal already wiped the local board + emitted fx.
+        if (store.game?.mode === "coop") {
+          store.applyDisaster(msg.playerId, msg.kind, msg.cellIndexes);
+        }
         break;
       case "fun-settings":
         store.applyFunSettings(msg.petsEnabled, msg.eventsEnabled);

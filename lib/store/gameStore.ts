@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import { customAlphabet } from "nanoid";
 import {
+  DISASTER_WIPE_COUNT,
   INVITE_CODE_ALPHABET,
   INVITE_CODE_LENGTH,
   PLAYER_COLORS,
@@ -50,6 +51,29 @@ function gridOf(board: CellEntry[]): Grid {
 function newlyCompletedUnits(before: Grid, after: Grid, solution: Grid): number[][] {
   const prev = new Set(getCompletedUnits(before, solution).map((u) => u.join(",")));
   return getCompletedUnits(after, solution).filter((u) => !prev.has(u.join(",")));
+}
+
+/**
+ * Pick up to `count` distinct cells a disaster may wipe: locked entries only
+ * (correct placements by players or pets). Wiping the wrong entry that
+ * triggered the disaster would be mercy, not a penalty — and givens are
+ * untouchable.
+ */
+function pickWipeCells(board: CellEntry[], puzzle: Grid, count: number): number[] {
+  const candidates: number[] = [];
+  for (let i = 0; i < 81; i++) {
+    const cell = board[i];
+    if (puzzle[i] === 0 && cell && cell.locked && cell.value !== 0) {
+      candidates.push(i);
+    }
+  }
+  // Partial Fisher-Yates: the first `count` slots end up uniformly random.
+  const n = Math.min(count, candidates.length);
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(Math.random() * (candidates.length - i));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  return candidates.slice(0, n);
 }
 
 // Content-equality helpers used to keep existing object references when a
@@ -541,10 +565,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
   petAssistLocal: () => {
     const { game, localPlayer } = get();
-    if (!game || !localPlayer || game.mode !== "race" || game.phase !== "playing") {
-      return null;
-    }
-    const board = get().localBoard;
+    if (!game || !localPlayer || game.phase !== "playing") return null;
+    const board = game.mode === "coop" ? game.coopBoard : get().localBoard;
     const empty: number[] = [];
     for (let i = 0; i < 81; i++) {
       const cell = board[i];
@@ -556,6 +578,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     if (empty.length <= 3) return null;
     const i = empty[Math.floor(Math.random() * empty.length)];
     const value = game.solution[i];
+
+    if (game.mode === "coop") {
+      // Never applied locally — all clients (incl. sender) apply the echo
+      // via applyPetHelp in Ably delivery order.
+      return { type: "pet-help", playerId: localPlayer.id, cellIndex: i, value };
+    }
 
     const before = gridOf(board);
     const nextBoard = board.slice();
@@ -589,6 +617,77 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       game: { ...game, raceProgress: upsertProgress(game.raceProgress, progress) },
     });
     return { type: "race-progress", progress };
+  },
+
+  disasterLocal: (kind) => {
+    const { game, localPlayer } = get();
+    if (!game || !localPlayer || game.phase !== "playing") return [];
+    const count = DISASTER_WIPE_COUNT[kind] ?? 1;
+
+    if (game.mode === "coop") {
+      const cells = pickWipeCells(game.coopBoard, game.puzzle, count);
+      if (cells.length === 0) return [];
+      // Never applied locally — all clients (incl. sender) wipe the echo
+      // via applyDisaster in Ably delivery order.
+      return [
+        { type: "disaster", kind, playerId: localPlayer.id, cellIndexes: cells },
+      ];
+    }
+
+    // --- race: wipe the local player's own board immediately ---
+    const board = get().localBoard;
+    const cells = pickWipeCells(board, game.puzzle, count);
+    if (cells.length === 0) return [];
+    const nextBoard = board.slice();
+    for (const i of cells) {
+      nextBoard[i] = { value: 0, byPlayer: null, locked: false };
+    }
+    const after = gridOf(nextBoard);
+
+    const prev = game.raceProgress.find((p) => p.playerId === localPlayer.id);
+    const correctCount = after.reduce(
+      (n, v, idx) =>
+        n + (game.puzzle[idx] === 0 && v !== 0 && v === game.solution[idx] ? 1 : 0),
+      0,
+    );
+    const progress: RaceProgress = {
+      playerId: localPlayer.id,
+      correctCount,
+      mistakes: prev?.mistakes ?? 0,
+      finishedAtMs: prev?.finishedAtMs ?? null,
+    };
+    set({
+      localBoard: nextBoard,
+      game: { ...game, raceProgress: upsertProgress(game.raceProgress, progress) },
+    });
+    fxBus.emit({ type: "disaster", kind, cells, intense: true, byName: null });
+    return [
+      { type: "disaster", kind, playerId: localPlayer.id, cellIndexes: cells },
+      { type: "race-progress", progress },
+    ];
+  },
+
+  applyDisaster: (playerId, kind, cellIndexes) => {
+    const { game, localPlayer } = get();
+    if (!game || game.mode !== "coop" || game.phase !== "playing") return;
+    if (!Array.isArray(cellIndexes)) return;
+    const wiped: number[] = [];
+    const nextBoard = game.coopBoard.slice();
+    for (const i of cellIndexes) {
+      if (!Number.isInteger(i) || i < 0 || i > 80) continue;
+      if (game.puzzle[i] !== 0) continue; // givens survive anything
+      if (!nextBoard[i] || nextBoard[i].value === 0) continue;
+      nextBoard[i] = { value: 0, byPlayer: null, locked: false };
+      wiped.push(i);
+    }
+    if (wiped.length > 0) {
+      set({ game: { ...game, coopBoard: nextBoard } });
+    }
+    const byName =
+      localPlayer !== null && playerId === localPlayer.id
+        ? null
+        : game.players.find((p) => p.id === playerId)?.name ?? null;
+    fxBus.emit({ type: "disaster", kind, cells: wiped, intense: true, byName });
   },
 
   applyFunSettings: (petsEnabled, eventsEnabled) => {

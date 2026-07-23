@@ -100,15 +100,23 @@ Pure functions, no React. Vitest tests colocated (`lib/sudoku/sudoku.test.ts`).
   attributes — FxLayer queries `[data-cell-index="i"]` for coords, falling
   back to the board center.
 
-### pets — fun extras (pixel pets + random events)
+### pets — fun extras (pixel pets + disasters)
 - `lib/pets/catalog.ts`: pixel sprite data (10×10, 2 frames, player-color
   accent pixels), deterministic room-unique species assignment by player id,
   stable pet names. Pure; canvas rendering client-guarded.
 - `lib/pets/useFunDirector.ts`: `useFunDirector(publish)` — mounted by
-  GameShell; schedules `pet-help` (host in co-op; each client locally via
-  `petAssistLocal` in race) and `disaster` messages (host). Respects the
-  host-toggleable `petsEnabled` / `eventsEnabled` flags in SharedGameState
-  (toggled live via the `fun-settings` message; both default true).
+  GameShell; listens to the fx bus for the LOCAL player's move outcomes
+  (cell-correct / cell-wrong are only emitted for one's own placements, so
+  exactly one client rolls per move):
+  - correct placement → 5% chance the player's pet places a bonus correct
+    number (`petAssistLocal` builds the pet-help / race-progress message).
+  - wrong placement → 15% chance of a natural disaster that wipes 1-3
+    correct entries (`DISASTER_WIPE_COUNT` per kind) — from the shared
+    board in co-op (published, applied by all via `applyDisaster`) or the
+    offender's own board in race (`disasterLocal` wipes + publishes).
+  Respects the host-toggleable `petsEnabled` / `eventsEnabled` flags in
+  SharedGameState (toggled live via the `fun-settings` message; both
+  default true).
 - Players pick their pet in the lobby (`components/pets/PetPicker.tsx`,
   mirroring ColorPicker): the choice persists locally (`PlayerInfo.petId`),
   is announced via presence, and conflicts resolve deterministically by
@@ -116,10 +124,13 @@ Pure functions, no React. Vitest tests colocated (`lib/sudoku/sudoku.test.ts`).
   id-hash default).
 - `components/pets/PetLayer.tsx` (default export, no props): fixed overlay
   animating one pixel pet per player — wandering, dashing to
-  helped cells (`pet-help` fx), panicking on `disaster` fx, and playing
-  proximity interactions (hearts/duets/naps; purely local flavor).
+  helped cells (`pet-help` fx), panicking on intense `disaster` fx, and
+  playing proximity interactions (hearts/duets/naps; purely local flavor).
 - Pet help fills only empty cells with the correct value, attributed to the
   pet's owner, and never touches the last 3 empty cells.
+- Disasters wipe only locked (correct) non-given entries; FxLayer renders
+  per-kind visuals targeted at the wiped cells plus a toast naming the
+  offender and the damage (`disaster` FxEvent: cells/intense/byName).
 
 ## Conventions
 - All interactive components: `"use client"`.

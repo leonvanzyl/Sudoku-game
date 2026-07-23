@@ -25,7 +25,7 @@ const SHAKE_MS = 400;
 const VICTORY_CONFETTI_MS = 4500;
 const VICTORY_BANNER_MS = 5500;
 const DEFEAT_MS = 3200;
-const DISASTER_TOAST_MS = 3400;
+const DISASTER_TOAST_MS = 4200;
 
 const DISASTER_META: Record<DisasterKind, { emoji: string; label: string }> = {
   earthquake: { emoji: "🌋", label: "Earthquake!" },
@@ -34,6 +34,22 @@ const DISASTER_META: Record<DisasterKind, { emoji: string; label: string }> = {
   tornado: { emoji: "🌪️", label: "Tornado!" },
   lightning: { emoji: "⚡", label: "Lightning storm!" },
 };
+
+interface DisasterToast {
+  kind: DisasterKind;
+  wiped: number;
+  intense: boolean;
+  byName: string | null;
+}
+
+function disasterSubtitle(d: DisasterToast): string {
+  const nums = d.wiped === 1 ? "1 number" : `${d.wiped} numbers`;
+  if (!d.intense) return `${d.byName ?? "A rival"} lost ${nums}!`;
+  if (d.wiped === 0) return "It fizzled — nothing was lost";
+  return d.byName
+    ? `${d.byName}'s mistake wiped ${nums}!`
+    : `Your mistake wiped ${nums}!`;
+}
 
 type Banner =
   | { kind: "victory"; winnerName: string | null }
@@ -69,7 +85,7 @@ export default function FxLayer() {
   const [dim, setDim] = useState(false);
   const [flash, setFlash] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
-  const [disaster, setDisaster] = useState<DisasterKind | null>(null);
+  const [disaster, setDisaster] = useState<DisasterToast | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -168,38 +184,82 @@ export default function FxLayer() {
         }
         case "disaster": {
           if (!DISASTER_META[e.kind]) break; // unknown kind from the wire
-          setDisaster(e.kind);
+          const toast: DisasterToast = {
+            kind: e.kind,
+            wiped: e.cells.length,
+            intense: e.intense,
+            byName: e.byName,
+          };
+          setDisaster(toast);
           later(DISASTER_TOAST_MS, () =>
-            setDisaster((d) => (d === e.kind ? null : d)),
+            setDisaster((d) => (d === toast ? null : d)),
           );
+          // Not our board (another racer got hit): the toast is the story.
+          if (!e.intense) break;
+
           const center = boardCenterPoint();
+          /** Screen positions of the wiped cells — every kind strikes them. */
+          const targets = e.cells.map(cellPoint);
+          /** The "you lost this" accent fired at each struck cell. */
+          const wipeHit = (p: { x: number; y: number }, color: string) => {
+            engine.burst(p.x, p.y, color, 26, 300);
+            engine.sparkle(p.x, p.y, "#f87171", 6);
+          };
+
           switch (e.kind) {
             case "earthquake": {
-              // Three shakes with dusty puffs at random cells.
+              // Three shakes, dusty puffs across the board, and the wiped
+              // cells crumble one after another.
               for (let k = 0; k < 3; k++) later(k * 450, shake);
-              for (let k = 0; k < 10; k++) {
-                engine.schedule(k * 130, () => {
+              for (let k = 0; k < 12; k++) {
+                engine.schedule(k * 120, () => {
                   const p = cellPoint(Math.floor(Math.random() * 81));
                   engine.puff(p.x, p.y, "#a8a29e");
                 });
               }
+              targets.forEach((p, k) => {
+                engine.schedule(300 + k * 380, () => {
+                  wipeHit(p, "#d6bda5");
+                  engine.puff(p.x, p.y, "#a8a29e");
+                });
+              });
               break;
             }
             case "meteor-shower": {
-              for (let k = 0; k < 14; k++) {
-                engine.schedule(k * 170 + Math.random() * 90, () => {
+              // Ambient meteors streak past while aimed strikes slam into
+              // each wiped cell and detonate on impact.
+              for (let k = 0; k < 10; k++) {
+                engine.schedule(k * 200 + Math.random() * 90, () => {
                   const x = Math.random() * (window.innerWidth + 300);
                   engine.meteor(x, -20);
                 });
               }
+              targets.forEach((p, k) => {
+                engine.schedule(250 + k * 300, () => {
+                  const flightMs = engine.meteorStrike(p.x, p.y);
+                  engine.schedule(flightMs, () => {
+                    wipeHit(p, "#fb923c");
+                    engine.sparkle(p.x, p.y, "#fde68a", 10);
+                  });
+                  if (k === 0) later(250 + flightMs, shake);
+                });
+              });
               break;
             }
             case "blizzard": {
+              // Snowfall, then the wiped cells flash-freeze and shatter.
               engine.confetti(4200, BLIZZARD_COLORS);
+              targets.forEach((p, k) => {
+                engine.schedule(400 + k * 320, () => {
+                  wipeHit(p, "#bae6fd");
+                  engine.sparkle(p.x, p.y, "#e0f2fe", 12);
+                });
+              });
               break;
             }
             case "tornado": {
-              // Sparkle spiral winding outward from the board center.
+              // Sparkle spiral winding outward from the board center, then
+              // the funnel rips the wiped numbers off the board.
               for (let k = 0; k < 36; k++) {
                 engine.schedule(k * 65, () => {
                   const a = k * 0.55;
@@ -213,20 +273,37 @@ export default function FxLayer() {
                 });
               }
               later(500, shake);
+              targets.forEach((p, k) => {
+                engine.schedule(600 + k * 300, () => {
+                  wipeHit(p, "#a5f3fc");
+                  engine.puff(p.x, p.y, "#67e8f9");
+                });
+              });
               break;
             }
             case "lightning": {
-              // Two quick white flashes with spark bursts up top.
+              // White flashes, then a bolt stabs down onto each wiped cell.
               setFlash(true);
               later(90, () => setFlash(false));
               later(260, () => setFlash(true));
               later(380, () => setFlash(false));
-              for (let k = 0; k < 3; k++) {
-                engine.schedule(k * 140, () => {
-                  const x = window.innerWidth * (0.2 + Math.random() * 0.6);
-                  engine.sparkle(x, window.innerHeight * 0.12, "#fef9c3", 12);
+              targets.forEach((p, k) => {
+                engine.schedule(200 + k * 260, () => {
+                  // Bolt: sparkles strobed down the column above the cell.
+                  const steps = 6;
+                  for (let j = 0; j <= steps; j++) {
+                    engine.schedule(j * 28, () => {
+                      const y = p.y * (j / steps);
+                      engine.sparkle(p.x + (Math.random() - 0.5) * 14, y, "#fef9c3", 4);
+                    });
+                  }
+                  engine.schedule(steps * 28, () => {
+                    wipeHit(p, "#fde047");
+                    engine.sparkle(p.x, p.y, "#ffffff", 8);
+                  });
                 });
-              }
+              });
+              if (targets.length > 0) later(370, shake);
               break;
             }
           }
@@ -372,7 +449,7 @@ export default function FxLayer() {
         <AnimatePresence>
           {disaster && (
             <m.div
-              key={disaster}
+              key={`${disaster.kind}-${disaster.wiped}-${disaster.byName ?? ""}`}
               initial={{ opacity: 0, y: -18, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -12, scale: 0.95 }}
@@ -380,8 +457,8 @@ export default function FxLayer() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "0.5rem",
-                padding: "0.5rem 1.1rem",
+                gap: "0.6rem",
+                padding: "0.55rem 1.1rem",
                 borderRadius: "0.9rem",
                 background: "rgba(15, 15, 30, 0.8)",
                 border: "1px solid rgba(165, 243, 252, 0.35)",
@@ -390,19 +467,35 @@ export default function FxLayer() {
                 WebkitBackdropFilter: "blur(8px)",
               }}
             >
-              <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>
-                {DISASTER_META[disaster].emoji}
+              <span style={{ fontSize: "1.4rem", lineHeight: 1 }}>
+                {DISASTER_META[disaster.kind].emoji}
               </span>
-              <span
-                style={{
-                  fontWeight: 700,
-                  fontSize: "0.85rem",
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  color: "rgba(224, 242, 254, 0.95)",
-                }}
-              >
-                {DISASTER_META[disaster].label}
+              <span>
+                <span
+                  style={{
+                    display: "block",
+                    fontWeight: 700,
+                    fontSize: "0.85rem",
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "rgba(224, 242, 254, 0.95)",
+                  }}
+                >
+                  {DISASTER_META[disaster.kind].label}
+                </span>
+                <span
+                  style={{
+                    display: "block",
+                    marginTop: "0.1rem",
+                    fontSize: "0.72rem",
+                    color:
+                      disaster.intense && disaster.wiped > 0
+                        ? "rgba(252, 165, 165, 0.95)"
+                        : "rgba(186, 230, 253, 0.75)",
+                  }}
+                >
+                  {disasterSubtitle(disaster)}
+                </span>
               </span>
             </m.div>
           )}

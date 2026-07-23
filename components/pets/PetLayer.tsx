@@ -7,11 +7,12 @@
 // Pets are cosmetic and purely client-side: every client animates
 // all pets locally (positions differ between clients and that's
 // fine). The gameplay-relevant part — a pet filling a cell — comes
-// in over the fx bus as a `pet-help` event (host-published in
-// co-op, local in race), which sends the owner's pet dashing to
-// that cell to celebrate.
+// in over the fx bus as a `pet-help` event (a lucky-chance reward
+// for its owner's correct placement), which sends the owner's pet
+// dashing to that cell to celebrate.
 //
-// Also on the fx bus: `disaster` makes every pet panic-scatter.
+// Also on the fx bus: an intense `disaster` (this board got hit)
+// makes every pet panic-scatter.
 // Pets that wander close to each other stop and interact (hearts,
 // duets, naps) — local flavor, no networking.
 //
@@ -212,7 +213,8 @@ export default function PetLayer() {
         s.ty = target.y - PET_PX * 0.4; // perch just above the digit
         s.emote = "❕";
         s.emoteUntil = performance.now() + 900;
-      } else if (e.type === "disaster") {
+      } else if (e.type === "disaster" && e.intense) {
+        // Only when THIS board is hit — a rival's disaster is their problem.
         const now = performance.now();
         for (const s of states.values()) {
           s.mode = "panic";

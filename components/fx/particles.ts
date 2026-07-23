@@ -249,6 +249,57 @@ export class FxEngine {
     }
   }
 
+  /**
+   * Meteor aimed to impact exactly (tx, ty) — used to strike the cells a
+   * meteor-shower disaster wipes. Returns the flight time in ms so the
+   * caller can schedule the impact burst.
+   */
+  meteorStrike(tx: number, ty: number): number {
+    const flight = 0.55;
+    const sx = tx + rand(180, 300);
+    const sy = ty - rand(360, 480);
+    const vx = (tx - sx) / flight;
+    const vy = (ty - sy) / flight;
+    this.push({
+      x: sx,
+      y: sy,
+      vx,
+      vy,
+      life: flight,
+      maxLife: flight,
+      size: rand(4.5, 6.5),
+      rot: 0,
+      vr: 0,
+      color: pick(["#fdba74", "#fb923c", "#fde68a"] as const),
+      shape: "dot",
+      gravity: 0,
+      drag: 0,
+      glow: 14,
+      phase: 0,
+    });
+    // Trailing embers strung out behind the head.
+    for (let i = 1; i <= 6; i++) {
+      this.push({
+        x: sx - (vx / 60) * i,
+        y: sy - (vy / 60) * i,
+        vx: vx * 0.94,
+        vy: vy * 0.94,
+        life: flight * rand(0.5, 0.9),
+        maxLife: flight,
+        size: rand(1.4, 2.8),
+        rot: 0,
+        vr: 0,
+        color: pick(GOLD_COLORS),
+        shape: "dot",
+        gravity: 0,
+        drag: 0,
+        glow: 6,
+        phase: 0,
+      });
+    }
+    return flight * 1000;
+  }
+
   /** Start a confetti rain for `durationMs` (victory). */
   confetti(durationMs: number, colors: readonly string[]): void {
     this.confettiUntil = this.t + durationMs / 1000;

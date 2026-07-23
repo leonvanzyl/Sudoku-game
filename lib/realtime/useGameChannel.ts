@@ -426,8 +426,29 @@ export function useGameChannel(
           break;
         }
         case "disaster": {
-          // Purely cosmetic — straight to the fx bus, nothing in the store.
-          fxBus.emit({ type: "disaster", kind: data.kind });
+          const g = store.game;
+          if (!g) break;
+          if (g.mode === "coop") {
+            // Wipes the shared board — ALL clients (incl. the sender) apply
+            // in delivery order; applyDisaster also emits the fx.
+            store.applyDisaster(
+              data.playerId,
+              data.kind,
+              Array.isArray(data.cellIndexes) ? data.cellIndexes : [],
+            );
+          } else if (data.playerId !== store.localPlayer?.id) {
+            // Race: the sender already wiped (and dramatized) its own board;
+            // everyone else just sees what happened to them.
+            const byName =
+              g.players.find((p) => p.id === data.playerId)?.name ?? null;
+            fxBus.emit({
+              type: "disaster",
+              kind: data.kind,
+              cells: Array.isArray(data.cellIndexes) ? data.cellIndexes : [],
+              intense: false,
+              byName,
+            });
+          }
           break;
         }
         case "fun-settings": {
