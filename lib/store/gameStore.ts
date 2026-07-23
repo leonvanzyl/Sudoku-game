@@ -15,7 +15,6 @@ import {
   type PlayerInfo,
   type RaceProgress,
   type SharedGameState,
-  type ViewMode,
 } from "@/lib/types";
 import { generatePuzzle, getCompletedUnits, isComplete } from "@/lib/sudoku";
 import { fxBus } from "@/lib/fx/bus";
@@ -34,8 +33,6 @@ import {
   saveProgression,
   xpForResult,
 } from "./progression";
-
-const VIEW_MODE_KEY = "sudoku:view-mode";
 
 const generateInviteCode = customAlphabet(INVITE_CODE_ALPHABET, INVITE_CODE_LENGTH);
 
@@ -107,20 +104,6 @@ function mergeCoopBoard(current: CellEntry[], incoming: CellEntry[]): CellEntry[
     if (cur.locked || cur.value !== inc.value) return cur;
     return inc;
   });
-}
-
-function initialViewMode(): ViewMode {
-  if (typeof window === "undefined") return "2d";
-  try {
-    const saved = window.localStorage.getItem(VIEW_MODE_KEY);
-    if (saved === "2d" || saved === "3d") return saved;
-  } catch {
-    // storage unavailable — fall through to media query default
-  }
-  return typeof window.matchMedia === "function" &&
-    window.matchMedia("(min-width: 768px)").matches
-    ? "3d"
-    : "2d";
 }
 
 /**
@@ -571,19 +554,6 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   localBoard: [],
-
-  // --- view prefs ---
-  viewMode: initialViewMode(),
-  setViewMode: (v) => {
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(VIEW_MODE_KEY, v);
-      } catch {
-        // storage unavailable — keep in-memory only
-      }
-    }
-    set({ viewMode: v });
-  },
 
   // --- progression ---
   progression: loadProgression(),

@@ -7,7 +7,9 @@
 //   - red edge vignette + body shake on cell-wrong
 //   - victory / defeat banners (framer-motion), auto-dismissed
 // One rAF loop drives the canvas; events arriving between frames
-// are queued and drained at the start of the next frame.
+// are queued and drained at the start of the next frame. The loop
+// only runs while there is something to animate — an idle overlay
+// costs zero CPU.
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
@@ -38,9 +40,8 @@ type Banner =
   | { kind: "defeat" };
 
 /**
- * Screen position (CSS px) for a cell. Prefers the 2D board's
- * [data-cell-index] element; in 3D mode falls back to the
- * center-bottom of the board area, then the viewport center.
+ * Screen position (CSS px) for a cell: the board's [data-cell-index]
+ * element, falling back to the board center, then the viewport center.
  */
 function cellPoint(index: number): { x: number; y: number } {
   if (typeof document === "undefined") return { x: 0, y: 0 };
@@ -49,27 +50,12 @@ function cellPoint(index: number): { x: number; y: number } {
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
-  return boardFallbackPoint();
+  return boardCenterPoint();
 }
 
-/** Center-bottom of the board area, else viewport center. */
-function boardFallbackPoint(): { x: number; y: number } {
-  const board =
-    document.querySelector("[data-board-area]") ??
-    // 3D mode: the R3F canvas (never our own — ours has data-fx-canvas).
-    document.querySelector("canvas:not([data-fx-canvas])");
-  if (board) {
-    const r = board.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.bottom - Math.min(40, r.height * 0.1) };
-  }
-  return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-}
-
-/** Center of the board area, else viewport center. */
+/** Center of the board area ([data-board-area]), else viewport center. */
 function boardCenterPoint(): { x: number; y: number } {
-  const board =
-    document.querySelector("[data-board-area]") ??
-    document.querySelector("canvas:not([data-fx-canvas])");
+  const board = document.querySelector("[data-board-area]");
   if (board) {
     const r = board.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -249,15 +235,11 @@ export default function FxLayer() {
       }
     };
 
-    const unsubscribe = fxBus.on((e) => {
-      queue.push(e);
-    });
-
     let raf = 0;
-    let last = performance.now();
+    let running = false;
+    let last = 0;
     let canvasDirty = false;
     const loop = (now: number) => {
-      raf = requestAnimationFrame(loop);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
 
@@ -271,12 +253,28 @@ export default function FxLayer() {
         engine.update(dt, w, h);
         ctx.clearRect(0, 0, w, h);
         engine.draw(ctx);
-        // After the engine goes idle, clear one final frame then stop
-        // touching the canvas so idle frames cost nothing.
+        // After the engine goes idle, clear one final frame before stopping.
         canvasDirty = engine.active;
       }
+
+      // Nothing left to animate: park the loop until the next fx event.
+      if (!engine.active && !canvasDirty && queue.length === 0) {
+        running = false;
+        return;
+      }
+      raf = requestAnimationFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
+    const wakeLoop = () => {
+      if (running) return;
+      running = true;
+      last = performance.now();
+      raf = requestAnimationFrame(loop);
+    };
+
+    const unsubscribe = fxBus.on((e) => {
+      queue.push(e);
+      wakeLoop();
+    });
 
     return () => {
       cancelAnimationFrame(raf);

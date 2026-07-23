@@ -1,7 +1,7 @@
 # Architecture Contracts
 
 Multiplayer Sudoku — Next.js 16 (App Router) + React 19 + Tailwind 4 + Ably +
-react-three-fiber + zustand. Deployed to Vercel. No server persistence: the
+zustand. Deployed to Vercel. No server persistence: the
 **host client is the authority**; the game dies when the host ends the session.
 
 All shared types live in `lib/types.ts`. **Never redefine them.**
@@ -30,7 +30,6 @@ All shared types live in `lib/types.ts`. **Never redefine them.**
 | realtime | `app/api/ably-token/route.ts`, `lib/realtime/*` (ablyClient.ts, useGameChannel.ts) |
 | store    | `lib/store/*` (gameStore.ts, progression.ts, localPlayer.ts) |
 | ui-2d    | `app/layout.tsx`, `app/page.tsx`, `app/game/[code]/page.tsx`, `app/globals.css`, `components/board2d/*`, `components/lobby/*`, `components/hud/*`, `components/GameShell.tsx` |
-| ui-3d    | `components/board3d/*` |
 | fx       | `lib/fx/*` (bus.ts), `components/fx/*` |
 | pets     | `lib/pets/*` (catalog.ts, useFunDirector.ts, pets.test.ts), `components/pets/*` |
 
@@ -82,21 +81,12 @@ Pure functions, no React. Vitest tests colocated (`lib/sudoku/sudoku.test.ts`).
 - `app/game/[code]/page.tsx`: renders `GameShell` (client component).
 - `GameShell.tsx`: calls `useGameChannel(code)`; renders lobby (phase=lobby:
   player list w/ colors, big invite-code display w/ copy button, host start
-  button) or game screen: board area (2D board, or `Board3D` via
-  `next/dynamic` ssr:false when `viewMode==='3d'`), HUD (players + live race
-  progress bars w/ names, timer, difficulty badge, 2D/3D toggle, number pad
+  button) or game screen: board area (`Board2D`), HUD (players + live race
+  progress bars w/ names, timer, difficulty badge, number pad
   1-9 + erase, host End Session button), and mounts `components/fx/FxLayer`.
 - Board2D: 9×9 grid, givens bold, player entries tinted with that player's
   color (name tooltip on hover), selection + peer highlight, conflicts marked.
   Keyboard input (1-9, arrows, backspace) + number pad. Mobile responsive.
-
-### ui-3d — `components/board3d/Board3D.tsx` (default export, no props)
-R3F `<Canvas>` scene reading the same store: 9×9 extruded cell tiles,
-floating 3D digits, given vs player-colored materials, selected-cell glow +
-camera-follow, subtle idle rotation + drag orbit (drei OrbitControls),
-bloom-ish emissive accents, cell pop animation on placement. Reads
-fx bus for success/error pulses (e.g. green ripple / red shake).
-Must not import from `components/board2d`.
 
 ### fx
 - `lib/fx/bus.ts`: tiny typed event bus — `fxBus.emit(e: FxEvent)`,
@@ -107,8 +97,8 @@ Must not import from `components/board2d`.
   sweep, screen-edge red flash + shake class on `cell-wrong`, full victory
   confetti + winner banner data (banner itself rendered here), defeat dim.
   Needs cell → screen position: board cells carry `data-cell-index`
-  attributes (2D) — FxLayer queries `[data-cell-index="i"]` for coords;
-  in 3D mode fall back to centered bursts.
+  attributes — FxLayer queries `[data-cell-index="i"]` for coords, falling
+  back to the board center.
 
 ### pets — fun extras (pixel pets + random events)
 - `lib/pets/catalog.ts`: pixel sprite data (10×10, 2 frames, player-color
@@ -125,7 +115,7 @@ Must not import from `components/board2d`.
   join order in `assignPetSpecies` (unrequested players keep their
   id-hash default).
 - `components/pets/PetLayer.tsx` (default export, no props): fixed overlay
-  (2D view only) animating one pixel pet per player — wandering, dashing to
+  animating one pixel pet per player — wandering, dashing to
   helped cells (`pet-help` fx), panicking on `disaster` fx, and playing
   proximity interactions (hearts/duets/naps; purely local flavor).
 - Pet help fills only empty cells with the correct value, attributed to the
@@ -134,7 +124,6 @@ Must not import from `components/board2d`.
 ## Conventions
 - All interactive components: `"use client"`.
 - Imports via `@/` alias. TypeScript strict. No new runtime deps beyond
-  what's in package.json (ably, zustand, three, @react-three/fiber,
-  @react-three/drei, framer-motion, nanoid).
+  what's in package.json (ably, zustand, framer-motion, nanoid).
 - `npm run build` and `npx vitest run` must pass.
 - Env: `ABLY_API_KEY` (server-only). `.env.example` documents it.

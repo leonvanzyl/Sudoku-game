@@ -6,7 +6,6 @@
 export type Difficulty = "easy" | "medium" | "hard" | "expert";
 export type GameMode = "coop" | "race";
 export type GamePhase = "lobby" | "playing" | "finished";
-export type ViewMode = "2d" | "3d";
 
 /** Cosmetic random events broadcast by the host mid-game. */
 export type DisasterKind =
@@ -236,10 +235,6 @@ export interface GameStore {
 
   /** Race mode: the local player's own board. */
   localBoard: CellEntry[];
-
-  // --- view prefs (persisted) ---
-  viewMode: ViewMode;
-  setViewMode: (v: ViewMode) => void;
 
   // --- progression (persisted via lib/store/progression.ts) ---
   progression: Progression;

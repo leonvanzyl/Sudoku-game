@@ -2,7 +2,7 @@
 // fx bus — tiny typed event emitter for game effects.
 // SSR-safe (no window/document access), no React.
 // Producers: lib/store/gameStore.ts (move outcomes).
-// Consumers: components/fx/FxLayer.tsx, components/board3d/*.
+// Consumers: components/fx/FxLayer.tsx, components/pets/PetLayer.tsx.
 // ============================================================
 
 import type { FxEvent, FxListener } from "@/lib/types";

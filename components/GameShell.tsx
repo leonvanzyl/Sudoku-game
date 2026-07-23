@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 import { useGameChannel } from "@/lib/realtime/useGameChannel";
 import { useGameStore } from "@/lib/store/gameStore";
@@ -16,15 +15,6 @@ import FxLayer from "@/components/fx/FxLayer";
 import PetLayer from "@/components/pets/PetLayer";
 import { useFunDirector } from "@/lib/pets/useFunDirector";
 import { fxBus } from "@/lib/fx/bus";
-
-const Board3D = dynamic(() => import("@/components/board3d/Board3D"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-full w-full items-center justify-center bg-[#060a13]">
-      <Spinner label="Loading 3D board…" />
-    </div>
-  ),
-});
 
 /* ---------------------------------------------------------------- */
 /* helpers                                                           */
@@ -94,46 +84,34 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
 
   /** Solo loopback: apply the message locally instead of publishing. */
   const soloDispatch = useCallback(async (msg: GameMessage): Promise<void> => {
+    /* Host duty in solo mode: after a co-op board mutation, declare the
+     * shared win once every cell matches the solution. */
+    const checkCoopComplete = () => {
+      const s = useGameStore.getState();
+      const g = s.game;
+      if (!g || g.mode !== "coop" || g.phase !== "playing" || g.winnerId !== null) return;
+      for (let i = 0; i < 81; i++) {
+        if ((g.coopBoard[i]?.value || g.puzzle[i]) !== g.solution[i]) return;
+      }
+      s.setGameOver(null);
+    };
+
     const store = useGameStore.getState();
     switch (msg.type) {
       case "start-game":
         store.applyStateSync(msg.state);
         break;
-      case "move": {
+      case "move":
         store.applyMove(msg.playerId, msg.cellIndex, msg.value);
-        const s = useGameStore.getState();
-        const g = s.game;
-        if (g && g.mode === "coop" && g.phase === "playing" && g.winnerId === null) {
-          let done = true;
-          for (let i = 0; i < 81; i++) {
-            if ((g.coopBoard[i]?.value || g.puzzle[i]) !== g.solution[i]) {
-              done = false;
-              break;
-            }
-          }
-          if (done) s.setGameOver(null);
-        }
+        checkCoopComplete();
         break;
-      }
       case "race-finished":
-        useGameStore.getState().setGameOver(msg.playerId);
+        store.setGameOver(msg.playerId);
         break;
-      case "pet-help": {
+      case "pet-help":
         store.applyPetHelp(msg.playerId, msg.cellIndex, msg.value);
-        const s = useGameStore.getState();
-        const g = s.game;
-        if (g && g.mode === "coop" && g.phase === "playing" && g.winnerId === null) {
-          let done = true;
-          for (let i = 0; i < 81; i++) {
-            if ((g.coopBoard[i]?.value || g.puzzle[i]) !== g.solution[i]) {
-              done = false;
-              break;
-            }
-          }
-          if (done) s.setGameOver(null);
-        }
+        checkCoopComplete();
         break;
-      }
       case "disaster":
         fxBus.emit({ type: "disaster", kind: msg.kind });
         break;
@@ -146,12 +124,13 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
     }
   }, []);
 
+  /** Solo "end session" is just leaving — there is nobody else to notify. */
+  const soloEndSession = useCallback(async () => {
+    useGameStore.getState().leaveGame();
+  }, []);
+
   const publish = solo ? soloDispatch : channel.publish;
-  const endSession = solo
-    ? async () => {
-        useGameStore.getState().leaveGame();
-      }
-    : channel.endSession;
+  const endSession = solo ? soloEndSession : channel.endSession;
 
   /* ---- fun extras: schedules pet help + random disasters ---- */
   useFunDirector(publish);
@@ -175,8 +154,6 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   const isHost = useGameStore((s) => s.isHost);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
-  const viewMode = useGameStore((s) => s.viewMode);
-  const setViewMode = useGameStore((s) => s.setViewMode);
 
   const mounted = useMounted();
   const [nameDraft, setNameDraft] = useState("");
@@ -184,8 +161,6 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [finalElapsedMs, setFinalElapsedMs] = useState<number | null>(null);
-  /** Players slide-over inside the fullscreen 3D view. */
-  const [showPlayers, setShowPlayers] = useState(false);
 
   const recordedRef = useRef(false);
 
@@ -203,19 +178,6 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
     },
     [publish],
   );
-
-  /* ---- keyboard fallback while the 3D board is shown ---- */
-  useEffect(() => {
-    if (viewMode !== "3d" || phase !== "playing") return;
-    const handler = (e: KeyboardEvent) => {
-      const t = e.target;
-      if (t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
-      if (e.key >= "1" && e.key <= "9") handleInput(Number(e.key));
-      else if (e.key === "0" || e.key === "Backspace" || e.key === "Delete") handleInput(0);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [viewMode, phase, handleInput]);
 
   /* ---- host: start the game ---- */
   const handleStart = useCallback(() => {
@@ -427,7 +389,6 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
   const accent = DIFFICULTY_ACCENT[game.difficulty];
   const winner = game.winnerId ? (game.players.find((p) => p.id === game.winnerId) ?? null) : null;
   const localWon = game.mode === "coop" ? true : game.winnerId === localPlayer.id;
-  const immersive3d = viewMode === "3d";
 
   const connectionDot = solo ? (
     <span className="rounded-full border border-violet-300/40 bg-violet-300/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-violet-200">
@@ -444,25 +405,6 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
             : "bg-amber-400 animate-pulse"
       }`}
     />
-  );
-
-  const viewToggle = (
-    <div className="flex overflow-hidden rounded-xl border border-white/10 bg-black/30">
-      {(["2d", "3d"] as const).map((v) => (
-        <button
-          key={v}
-          type="button"
-          onClick={() => setViewMode(v)}
-          className={`px-3 py-1.5 font-display text-[11px] font-bold tracking-widest transition ${
-            viewMode === v
-              ? "bg-cyan-400/20 text-cyan-200 shadow-[inset_0_0_14px_-6px_#22d3ee]"
-              : "bg-transparent text-white/45 hover:text-white/80"
-          }`}
-        >
-          {v.toUpperCase()}
-        </button>
-      ))}
-    </div>
   );
 
   /* Host-only switches for the fun extras (pets / random events). */
@@ -519,123 +461,48 @@ export default function GameShell({ code, solo = false }: { code: string; solo?:
 
   return (
     <div className="flex min-h-dvh flex-col">
-      {!immersive3d && (
-        /* ---------- top HUD bar (2D layout) ---------- */
-        <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-black/40 backdrop-blur-xl">
-          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-            <span className="neon-title hidden font-display text-sm font-extrabold tracking-[0.2em] sm:block">
-              NEON SUDOKU
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-xs tracking-[0.3em] text-cyan-200">
-              {game.code}
-            </span>
-            <span
-              className="rounded-full border px-3 py-1 font-display text-[10px] font-bold uppercase tracking-widest"
-              style={{ color: accent, borderColor: `${accent}55` }}
-            >
-              {game.difficulty}
-            </span>
-            <Timer startedAt={game.startedAt} running={game.phase === "playing"} />
-            {connectionDot}
-            <div className="ml-auto flex items-center gap-2">
-              {funToggles}
-              {viewToggle}
-              {endOrLeaveButton}
-            </div>
-          </div>
-        </header>
-      )}
-
-      {immersive3d ? (
-        /* ---------- fullscreen immersive 3D ---------- */
-        <div data-board-area="" className="fixed inset-0 z-30 bg-[#060a13]">
-          <Board3D />
-
-          {/* floating top bar */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1.5 px-2 pt-[max(0.6rem,env(safe-area-inset-top))]">
-            <div className="flex min-w-0 shrink items-center gap-2 rounded-xl border border-white/10 bg-black/45 px-2.5 py-1.5 backdrop-blur-xl">
-              <span className="hidden font-mono text-[11px] tracking-[0.2em] text-cyan-200 min-[430px]:block">
-                {game.code}
-              </span>
-              <span
-                className="hidden font-display text-[10px] font-bold uppercase tracking-widest sm:block"
-                style={{ color: accent }}
-              >
-                {game.difficulty}
-              </span>
-              <Timer startedAt={game.startedAt} running={game.phase === "playing"} />
-              {connectionDot}
-            </div>
-            <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1.5">
-              {funToggles}
-              <button
-                type="button"
-                onClick={() => setShowPlayers((v) => !v)}
-                className={`rounded-xl border px-2.5 py-1.5 font-display text-[11px] font-bold tracking-widest transition ${
-                  showPlayers
-                    ? "border-cyan-400/50 bg-cyan-400/15 text-cyan-200"
-                    : "border-white/10 bg-black/30 text-white/60 hover:text-white/90"
-                }`}
-              >
-                {game.players.length}P
-              </button>
-              {viewToggle}
-              {endOrLeaveButton}
-            </div>
-          </div>
-
-          {/* players slide-over */}
-          <AnimatePresence>
-            {showPlayers && (
-              <motion.div
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 24 }}
-                transition={{ duration: 0.22, ease: "easeOut" }}
-                className="absolute right-3 top-[calc(3.6rem+env(safe-area-inset-top))] w-80 max-w-[calc(100vw-1.5rem)]"
-              >
-                <PlayersPanel />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* touch hint (fades out on its own) */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 1, 1, 0] }}
-            transition={{ duration: 6, times: [0, 0.1, 0.75, 1], delay: 0.8 }}
-            className="pointer-events-none absolute inset-x-0 top-[calc(4.4rem+env(safe-area-inset-top))] text-center font-mono text-[10px] uppercase tracking-[0.3em] text-white/45"
+      {/* ---------- top HUD bar ---------- */}
+      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-black/40 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+          <span className="neon-title hidden font-display text-sm font-extrabold tracking-[0.2em] sm:block">
+            NEON SUDOKU
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-xs tracking-[0.3em] text-cyan-200">
+            {game.code}
+          </span>
+          <span
+            className="rounded-full border px-3 py-1 font-display text-[10px] font-bold uppercase tracking-widest"
+            style={{ color: accent, borderColor: `${accent}55` }}
           >
-            drag to orbit · pinch to zoom · double-tap to recenter
-          </motion.p>
-
-          {/* floating number pad */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-3 pb-[max(0.9rem,env(safe-area-inset-bottom))]">
-            <div className="pointer-events-auto rounded-2xl border border-white/10 bg-black/50 p-2 shadow-[0_8px_40px_-8px_rgba(0,0,0,0.8)] backdrop-blur-xl">
-              <NumberPad compact onInput={handleInput} disabled={game.phase !== "playing"} />
-            </div>
+            {game.difficulty}
+          </span>
+          <Timer startedAt={game.startedAt} running={game.phase === "playing"} />
+          {connectionDot}
+          <div className="ml-auto flex items-center gap-2">
+            {funToggles}
+            {endOrLeaveButton}
           </div>
         </div>
-      ) : (
-        /* ---------- main area (2D layout) ---------- */
-        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center gap-6 px-4 py-6 lg:flex-row lg:items-start lg:justify-center">
-          <div className="flex w-full flex-col items-center gap-5 lg:flex-1">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.35, ease: "easeOut" }}
-              className="flex w-full justify-center"
-            >
-              <Board2D onInput={handleInput} />
-            </motion.div>
-            <NumberPad onInput={handleInput} disabled={game.phase !== "playing"} />
-          </div>
+      </header>
 
-          <aside className="w-full max-w-[min(92vw,560px)] lg:w-80 lg:max-w-none">
-            <PlayersPanel />
-          </aside>
-        </main>
-      )}
+      {/* ---------- main area ---------- */}
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center gap-6 px-4 py-6 lg:flex-row lg:items-start lg:justify-center">
+        <div className="flex w-full flex-col items-center gap-5 lg:flex-1">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+            className="flex w-full justify-center"
+          >
+            <Board2D onInput={handleInput} />
+          </motion.div>
+          <NumberPad onInput={handleInput} disabled={game.phase !== "playing"} />
+        </div>
+
+        <aside className="w-full max-w-[min(92vw,560px)] lg:w-80 lg:max-w-none">
+          <PlayersPanel />
+        </aside>
+      </main>
 
       <PetLayer />
       <FxLayer />

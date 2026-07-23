@@ -2,7 +2,7 @@
 
 // ============================================================
 // PetLayer — fixed, pointer-events-none overlay that brings each
-// player's pixel pet to life on the 2D board.
+// player's pixel pet to life on the board.
 //
 // Pets are cosmetic and purely client-side: every client animates
 // all pets locally (positions differ between clients and that's
@@ -99,9 +99,8 @@ export default function PetLayer() {
   const players = useGameStore((s) => s.game?.players ?? null);
   const phase = useGameStore((s) => s.game?.phase ?? null);
   const petsEnabled = useGameStore((s) => s.game?.petsEnabled ?? true);
-  const viewMode = useGameStore((s) => s.viewMode);
 
-  const active = phase === "playing" && petsEnabled && viewMode === "2d";
+  const active = phase === "playing" && petsEnabled;
 
   const pets: PetMeta[] = useMemo(() => {
     if (!players || !active) return [];

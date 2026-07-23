@@ -2,8 +2,8 @@
 
 A realtime multiplayer sudoku game with a neon-dark aesthetic. Solve one board
 together in **co-op**, or take the same puzzle head-to-head in a **race**.
-Built with Next.js (App Router), React, Tailwind CSS 4, Zustand, Ably realtime
-messaging, and a react-three-fiber 3D board.
+Built with Next.js (App Router), React, Tailwind CSS 4, Zustand, and Ably
+realtime messaging.
 
 ## Features
 
@@ -14,9 +14,9 @@ messaging, and a react-three-fiber 3D board.
     finish wins; live progress bars and mistake counts for all players.
 - **Invite codes** — start a game, share the 6-letter code, friends join
   instantly. No accounts, no signup.
-- **2D and 3D boards** — a crisp responsive 2D grid and a full
-  react-three-fiber 3D scene (orbit camera, animated tiles, reflective floor),
-  toggleable at any time.
+- **Crisp responsive board** — a 9×9 grid with selection and peer
+  highlighting, conflict marking, and per-player colored entries, on
+  desktop and mobile alike.
 - **Juicy feedback** — particle bursts on correct cells, screen shake on
   mistakes, sparkle sweeps on completed rows/columns/boxes, confetti and
   banners on victory.
